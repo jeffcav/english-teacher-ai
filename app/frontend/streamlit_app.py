@@ -44,14 +44,17 @@ st.markdown("""
         padding: 20px;
         border-radius: 5px;
         margin: 10px 0;
+        color: #000000;
     }
     .success-feedback {
         background-color: #E8F5E9;
         border-left: 4px solid #4CAF50;
+        color: #000000;
     }
     .error-feedback {
         background-color: #FFEBEE;
         border-left: 4px solid #F44336;
+        color: #000000;
     }
     .transcript-box {
         background-color: #FFF9E6;
@@ -59,6 +62,7 @@ st.markdown("""
         border-radius: 5px;
         border: 1px solid #FFE082;
         margin: 10px 0;
+        color: #000000;
     }
 </style>
 """, unsafe_allow_html=True)
