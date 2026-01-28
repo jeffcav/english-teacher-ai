@@ -6,7 +6,7 @@ import os
 import asyncio
 import whisper
 import ollama
-import edge_tts
+import pyttsx3
 from pathlib import Path
 from typing import Optional
 from app.models.schemas import FeedbackResponse
@@ -138,7 +138,7 @@ class PhonicFlowArchitect:
         """
         Step 3: Convert LLM feedback into audio for the user.
         
-        Uses Edge-TTS for high-quality, natural-sounding synthesis.
+        Uses pyttsx3 for local, offline text-to-speech synthesis.
         
         Args:
             feedback_text: Text to synthesize into speech
@@ -150,16 +150,83 @@ class PhonicFlowArchitect:
         output_path = self.feedback_dir / f"{output_name}.mp3"
         
         try:
-            communicate = edge_tts.Communicate(
-                feedback_text,
-                self.tts_voice
-            )
-            await communicate.save(str(output_path))
-            return str(output_path)
+            # Validate input
+            if not feedback_text or len(feedback_text.strip()) == 0:
+                raise ValueError("Feedback text cannot be empty")
+            
+            print(f"[TTS] Synthesizing feedback ({len(feedback_text)} chars) to {output_path}")
+            
+            # Run pyttsx3 in a thread pool to avoid blocking the async context
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, self._synthesize_with_pyttsx3, feedback_text, str(output_path))
+            
+            # Verify file was created
+            if output_path.exists() and output_path.stat().st_size > 0:
+                print(f"[TTS] Successfully created audio file: {output_path} ({output_path.stat().st_size} bytes)")
+                return str(output_path)
+            else:
+                print(f"[TTS] ERROR: Audio file not created or empty at {output_path}")
+                raise Exception("Audio file creation failed - file not written")
+                
         except Exception as e:
-            # Fallback: create a dummy file and log error
-            output_path.touch()
-            return str(output_path)
+            print(f"[TTS] ERROR: {str(e)}")
+            raise Exception(f"TTS synthesis failed: {str(e)}")
+
+    def _synthesize_with_pyttsx3(self, text: str, output_file: str) -> None:
+        """
+        Helper method to run pyttsx3 synthesis.
+        Executed in a thread pool to avoid blocking.
+        
+        Args:
+            text: Text to synthesize
+            output_file: Output file path
+        """
+        import time
+        
+        engine = None
+        try:
+            print(f"[TTS] Initializing pyttsx3 engine...")
+            
+            # Create a fresh engine instance
+            engine = pyttsx3.init()
+            
+            # Configure voice and speech parameters
+            engine.setProperty('rate', 150)      # Speech rate (words per minute)
+            engine.setProperty('volume', 1.0)    # Volume (0.0 to 1.0)
+            
+            # Try to set a voice (optional)
+            try:
+                voices = engine.getProperty('voices')
+                if voices:
+                    print(f"[TTS] Available voices: {len(voices)}")
+                    engine.setProperty('voice', voices[0].id)
+                    print(f"[TTS] Using voice: {voices[0].name}")
+            except Exception as voice_error:
+                print(f"[TTS] Warning: Could not set voice - {voice_error}")
+            
+            print(f"[TTS] Saving to file: {output_file}")
+            
+            # Save to file
+            engine.save_to_file(text, output_file)
+            
+            print(f"[TTS] Running engine...")
+            engine.runAndWait()
+            
+            # Give callbacks time to complete before cleaning up
+            time.sleep(0.5)
+            
+            print(f"[TTS] Engine completed")
+            
+        except Exception as e:
+            print(f"[TTS] Error in _synthesize_with_pyttsx3: {str(e)}")
+            raise
+        finally:
+            # Ensure proper cleanup
+            if engine is not None:
+                try:
+                    engine.stop()
+                except:
+                    pass
 
     async def process_user_input(
         self,
