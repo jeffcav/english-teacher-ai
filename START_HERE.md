@@ -378,3 +378,11 @@ PhonicFlow is complete and ready to use.
 **Status:** ✅ Complete & Production Ready  
 **Date:** January 28, 2026  
 **Location:** /home/jeff/dev/pg/english/
+
+
+
+commands to start backend and frontend:
+```
+python -m uvicorn app.backend.main:app --reload --host 0.0.0.0 --port 8000
+streamlit run app/frontend/streamlit_app.py
+```
