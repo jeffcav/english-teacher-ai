@@ -6,10 +6,12 @@ from typing import Optional
 
 
 class FeedbackResponse(BaseModel):
-    """Response model for phonetic coaching feedback."""
+    """Response model for phonetic coaching feedback and conversational dialogue."""
     user_transcript: str
-    native_feedback: str
-    audio_feedback_path: str
+    coaching_feedback: str
+    conversational_response: str
+    coaching_audio_path: str
+    conversational_audio_path: str
 
 
 class ProcessingRequest(BaseModel):

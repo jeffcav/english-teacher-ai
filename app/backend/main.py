@@ -135,29 +135,68 @@ async def process_audio(
 
 
 @app.get("/audio/{session_id}", tags=["Audio Processing"])
-async def get_feedback_audio(session_id: str):
+async def get_feedback_audio(session_id: str, audio_type: str = "coaching"):
     """
-    Retrieve the synthesized feedback audio for a session.
+    Retrieve synthesized audio for a session.
     
     Args:
         session_id: Session identifier
+        audio_type: Type of audio to retrieve ("coaching" or "conversational")
         
     Returns:
         MP3 audio file with synthesized feedback
     """
-    audio_path = FEEDBACK_DIR / f"{session_id}.mp3"
+    audio_path = FEEDBACK_DIR / f"{session_id}_{audio_type}.mp3"
     
     if not audio_path.exists():
         raise HTTPException(
             status_code=404,
-            detail=f"Audio not found for session: {session_id}"
+            detail=f"Audio not found for session {session_id} (type: {audio_type})"
         )
     
     return FileResponse(
         path=audio_path,
         media_type="audio/mpeg",
-        filename=f"feedback_{session_id}.mp3"
+        filename=f"feedback_{session_id}_{audio_type}.mp3"
     )
+
+
+@app.get("/conversation/{session_id}", tags=["Conversation"])
+async def get_conversation_history(session_id: str):
+    """
+    Retrieve conversation history for a session.
+    
+    Args:
+        session_id: Session identifier
+        
+    Returns:
+        List of conversation turns with user input and AI responses
+    """
+    history = architect.get_conversation_history(session_id)
+    return {
+        "session_id": session_id,
+        "conversation_count": len(history),
+        "history": history
+    }
+
+
+@app.delete("/conversation/{session_id}", tags=["Conversation"])
+async def clear_conversation_history(session_id: str):
+    """
+    Clear conversation history for a session.
+    
+    Args:
+        session_id: Session identifier
+        
+    Returns:
+        Confirmation of cleared history
+    """
+    success = architect.clear_conversation_history(session_id)
+    return {
+        "status": "success" if success else "failed",
+        "session_id": session_id,
+        "message": "Conversation history cleared"
+    }
 
 
 @app.post("/config", tags=["Configuration"])

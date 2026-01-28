@@ -1,14 +1,16 @@
 """
 PhonicFlowArchitect: Core orchestration engine for the AI tutor pipeline.
-Manages STT, LLM coaching, and TTS synthesis.
+Manages STT, LLM coaching, and TTS synthesis with conversation context.
 """
 import os
 import asyncio
+import json
+import re
 import whisper
 import ollama
 import pyttsx3
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict, Tuple
 from app.models.schemas import FeedbackResponse
 from app.core.config import (
     FEEDBACK_DIR,
@@ -29,6 +31,44 @@ class PhonicFlowArchitect:
     - Ollama (LLM): Analyzes and provides coaching
     - Edge-TTS (TTS): Synthesizes audio feedback
     """
+
+    @staticmethod
+    def _strip_xml_tags(text: str) -> str:
+        """
+        Remove XML/HTML tags from text while preserving content.
+        Handles various XML formats including nested tags, declarations, and HTML entities.
+        
+        Args:
+            text: Text potentially containing XML/HTML tags
+            
+        Returns:
+            Text with XML/HTML tags removed
+        """
+        if not text or not isinstance(text, str):
+            return text if isinstance(text, str) else ""
+        
+        # First, unescape HTML entities in case XML is HTML-encoded
+        # e.g., &lt;tag&gt; becomes <tag>
+        text = (text
+            .replace('&amp;', '&')  # Must be first to avoid double-unescaping
+            .replace('&lt;', '<')
+            .replace('&gt;', '>')
+            .replace('&quot;', '"')
+            .replace('&#39;', "'"))
+        
+        # Add space between consecutive tags to preserve word boundaries
+        # This handles cases like: </tag><tag> -> </tag> <tag>
+        text = re.sub(r'><', '> <', text)
+        
+        # Remove all XML-style tags: <...any content...>
+        # This handles: <tag>, </tag>, <tag/>, <?xml?>, <![CDATA[...]]>, etc.
+        # Replace tags with spaces to preserve word boundaries
+        text = re.sub(r'<[^>]+>', ' ', text)
+        
+        # Clean up any extra whitespace that might result
+        cleaned = ' '.join(text.split())
+        
+        return cleaned.strip()
 
     def __init__(
         self,
@@ -52,6 +92,10 @@ class PhonicFlowArchitect:
         self.llm_name = llm_name
         self.tts_voice = tts_voice
         self.feedback_dir = FEEDBACK_DIR
+        self.conversation_dir = FEEDBACK_DIR / "conversations"
+        
+        # Create conversations directory
+        self.conversation_dir.mkdir(parents=True, exist_ok=True)
         
         # Lazy-load models to avoid initialization overhead
         self._stt_engine = None
@@ -66,6 +110,91 @@ class PhonicFlowArchitect:
                 device="cuda" if whisper.torch.cuda.is_available() else "cpu"
             )
         return self._stt_engine
+
+    def get_conversation_history(self, session_id: str) -> List[Dict]:
+        """
+        Retrieve conversation history for a session.
+        
+        Args:
+            session_id: Session identifier
+            
+        Returns:
+            List of conversation entries with user/coach/conversation turns
+        """
+        history_file = self.conversation_dir / f"{session_id}.json"
+        if history_file.exists():
+            try:
+                with open(history_file, "r") as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"[HISTORY] Error loading conversation history: {str(e)}")
+                return []
+        return []
+
+    def save_conversation_turn(
+        self,
+        session_id: str,
+        user_transcript: str,
+        coaching_feedback: str,
+        conversational_response: str
+    ) -> None:
+        """
+        Save a conversation turn to history.
+        
+        Args:
+            session_id: Session identifier
+            user_transcript: What user said
+            coaching_feedback: Phonetic coaching
+            conversational_response: Conversational reply
+        """
+        history_file = self.conversation_dir / f"{session_id}.json"
+        
+        # Load existing history or start new
+        if history_file.exists():
+            try:
+                with open(history_file, "r") as f:
+                    history = json.load(f)
+            except:
+                history = []
+        else:
+            history = []
+        
+        # Append new turn
+        turn = {
+            "user": user_transcript,
+            "coaching": coaching_feedback,
+            "conversational": conversational_response
+        }
+        history.append(turn)
+        
+        # Save updated history
+        try:
+            with open(history_file, "w") as f:
+                json.dump(history, f, indent=2)
+            print(f"[HISTORY] Saved conversation turn {len(history)} for session {session_id}")
+        except Exception as e:
+            print(f"[HISTORY] Error saving conversation history: {str(e)}")
+
+    def clear_conversation_history(self, session_id: str) -> bool:
+        """
+        Clear conversation history for a session.
+        
+        Args:
+            session_id: Session identifier
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        history_file = self.conversation_dir / f"{session_id}.json"
+        if history_file.exists():
+            try:
+                os.remove(history_file)
+                print(f"[HISTORY] Cleared conversation history for session {session_id}")
+                return True
+            except Exception as e:
+                print(f"[HISTORY] Error clearing history: {str(e)}")
+                return False
+        return True
 
     def transcribe_speech(self, audio_file_path: str) -> str:
         """
@@ -99,41 +228,95 @@ class PhonicFlowArchitect:
         )
         return result['text'].strip()
 
-    async def get_linguistic_coaching(self, user_text: str) -> str:
+    async def get_linguistic_coaching(
+        self,
+        user_text: str,
+        conversation_history: List[Dict] = None
+    ) -> tuple[str, str]:
         """
-        Step 2: Use Ollama to analyze transcription and provide coaching.
+        Step 2: Use Ollama to analyze transcription and provide TWO outputs:
+        1. Coaching feedback about correctness and naturality
+        2. Conversational response as if responding to a friend
+        
+        Uses conversation history for context to enable natural multi-turn dialogue.
         
         The LLM analyzes the transcribed text for:
         - Pronunciation errors (inferred from spelling)
         - Grammar and syntax issues
         - Idiomatic alternatives
+        - Natural conversational response
+        - Context from previous exchanges
         
         Args:
             user_text: Transcribed speech from user
+            conversation_history: Previous turns in conversation (optional)
             
         Returns:
-            Linguistic coaching feedback (< 60 words)
+            Tuple of (coaching_feedback, conversational_response)
         """
         if not user_text or user_text.strip() == "":
-            return "No speech detected. Please try again with a clearer audio input."
+            return ("No speech detected. Please try again with a clearer audio input.", "")
 
         try:
+            # Build conversation context if history exists
+            context_text = ""
+            if conversation_history:
+                context_text = "\n\nCONVERSATION CONTEXT (previous exchanges):\n"
+                for i, turn in enumerate(conversation_history[-3:], 1):  # Last 3 turns for context
+                    context_text += f"Turn {i}:\n"
+                    context_text += f"  User: {turn['user']}\n"
+                    context_text += f"  Your conversational response: {turn['conversational']}\n"
+            
+            prompt = f"""Analyze the user's speech and provide TWO separate responses.{context_text}
+
+CURRENT USER INPUT: "{user_text}"
+
+RESPONSE FORMAT (clearly separate both parts):
+---COACHING---
+Provide feedback on pronunciation, grammar, and naturalness. Keep it under 50 words. Be encouraging. Reference context if relevant.
+
+---CONVERSATION---
+Respond naturally to what the user said, as if you were their friend having a conversation. Use context from previous exchanges. Keep it natural and conversational (under 50 words).
+"""
+            
             response = ollama.chat(
                 model=self.llm_name,
                 messages=[
-                    {'role': 'system', 'content': SYSTEM_PROMPT},
-                    {'role': 'user', 'content': f"User said: {user_text}"}
+                    {'role': 'system', 'content': "You are an English tutor and friendly conversationalist. Maintain conversation continuity by referring to previous exchanges when relevant."},
+                    {'role': 'user', 'content': prompt}
                 ],
                 stream=False
             )
-            return response['message']['content'].strip()
+            
+            response_text = response['message']['content'].strip()
+            
+            # Parse the two sections
+            coaching_feedback = ""
+            conversational_response = ""
+            
+            if "---COACHING---" in response_text and "---CONVERSATION---" in response_text:
+                # Split by the markers
+                coaching_section = response_text.split("---COACHING---")[1].split("---CONVERSATION---")[0].strip()
+                conversation_section = response_text.split("---CONVERSATION---")[1].strip()
+                
+                # Clean XML tags from both responses
+                coaching_feedback = self._strip_xml_tags(coaching_section)
+                conversational_response = self._strip_xml_tags(conversation_section)
+            else:
+                # Fallback: treat entire response as coaching if markers not found
+                coaching_feedback = self._strip_xml_tags(response_text)
+                conversational_response = "Thank you for sharing that!"
+            
+            return (coaching_feedback, conversational_response)
+            
         except Exception as e:
-            return f"Error generating feedback: {str(e)}"
+            return (f"Error generating feedback: {str(e)}", "")
 
     async def synthesize_feedback(
         self,
         feedback_text: str,
-        output_name: str
+        output_name: str,
+        feedback_type: str = "coaching"
     ) -> str:
         """
         Step 3: Convert LLM feedback into audio for the user.
@@ -143,18 +326,19 @@ class PhonicFlowArchitect:
         Args:
             feedback_text: Text to synthesize into speech
             output_name: Session ID or unique identifier for output file
+            feedback_type: Type of feedback ("coaching" or "conversational")
             
         Returns:
             Path to the generated MP3 file
         """
-        output_path = self.feedback_dir / f"{output_name}.mp3"
+        output_path = self.feedback_dir / f"{output_name}_{feedback_type}.mp3"
         
         try:
             # Validate input
             if not feedback_text or len(feedback_text.strip()) == 0:
                 raise ValueError("Feedback text cannot be empty")
             
-            print(f"[TTS] Synthesizing feedback ({len(feedback_text)} chars) to {output_path}")
+            print(f"[TTS] Synthesizing {feedback_type} feedback ({len(feedback_text)} chars) to {output_path}")
             
             # Run pyttsx3 in a thread pool to avoid blocking the async context
             loop = asyncio.get_event_loop()
@@ -237,13 +421,16 @@ class PhonicFlowArchitect:
         Orchestration Pipeline: Coordinates STT -> LLM -> TTS.
         
         This is the main entry point for processing user audio input.
+        Generates two types of responses:
+        1. Coaching feedback on correctness and naturality
+        2. Conversational response as if responding to a friend
         
         Args:
             input_audio_path: Path to user's recorded audio
             session_id: Unique session identifier
             
         Returns:
-            FeedbackResponse with transcript, coaching, and audio feedback
+            FeedbackResponse with transcript, coaching, conversational, and audio paths
             
         Raises:
             FileNotFoundError: If audio file doesn't exist
@@ -252,16 +439,33 @@ class PhonicFlowArchitect:
             # Step 1: Speech to Text
             transcript = self.transcribe_speech(input_audio_path)
             
-            # Step 2: Text to Coaching (LLM)
-            coaching_text = await self.get_linguistic_coaching(transcript)
+            # Step 2: Load conversation history for context
+            conversation_history = self.get_conversation_history(session_id)
             
-            # Step 3: Coaching to Speech (TTS)
-            audio_path = await self.synthesize_feedback(coaching_text, session_id)
+            # Step 3: Text to Coaching + Conversational (LLM with context)
+            coaching_text, conversational_text = await self.get_linguistic_coaching(
+                transcript,
+                conversation_history
+            )
+            
+            # Step 4: Both responses to Speech (TTS)
+            coaching_audio_path = await self.synthesize_feedback(coaching_text, session_id, "coaching")
+            conversational_audio_path = await self.synthesize_feedback(conversational_text, session_id, "conversational")
+            
+            # Step 5: Save this turn to conversation history
+            self.save_conversation_turn(
+                session_id,
+                transcript,
+                coaching_text,
+                conversational_text
+            )
             
             return FeedbackResponse(
                 user_transcript=transcript,
-                native_feedback=coaching_text,
-                audio_feedback_path=audio_path
+                coaching_feedback=coaching_text,
+                conversational_response=conversational_text,
+                coaching_audio_path=coaching_audio_path,
+                conversational_audio_path=conversational_audio_path
             )
         except FileNotFoundError as e:
             raise
