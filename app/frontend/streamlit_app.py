@@ -75,52 +75,74 @@ st.markdown("""
         margin-bottom: 30px;
     }
     
-    /* Chat-style messaging */
+    /* Chat-style messaging - WhatsApp/Telegram style */
     .chat-container {
         display: flex;
         flex-direction: column;
-        gap: 12px;
-        padding: 10px 0;
+        gap: 8px;
+        padding: 15px 10px;
+        max-width: 100%;
+        background-color: #F0F2F5;
+        border-radius: 10px;
+        min-height: 300px;
+        overflow-y: auto;
     }
     
     .chat-message {
         display: flex;
-        gap: 10px;
-        margin: 8px 0;
-        padding: 12px;
-        border-radius: 8px;
+        margin: 5px 0;
         animation: fadeIn 0.3s ease-in;
+        word-wrap: break-word;
+        max-width: 85%;
     }
     
     @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(10px); }
+        from { opacity: 0; transform: translateY(5px); }
         to { opacity: 1; transform: translateY(0); }
     }
     
     .user-message {
-        background-color: #E3F2FD;
-        margin-left: 20px;
-        border-left: 4px solid #2196F3;
+        align-self: flex-end;
+        margin-left: auto;
+        margin-right: 0;
+    }
+    
+    .user-message .message-bubble {
+        background-color: #DCF8C6;
         color: #000000;
+        border-radius: 18px 4px 18px 18px;
+        padding: 10px 14px;
+        box-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
     }
     
     .ai-message {
-        background-color: #F5F5F5;
-        margin-right: 20px;
-        border-left: 4px solid #4CAF50;
+        align-self: flex-start;
+        margin-right: auto;
+        margin-left: 0;
+    }
+    
+    .ai-message .message-bubble {
+        background-color: #FFFFFF;
         color: #000000;
+        border-radius: 4px 18px 18px 18px;
+        padding: 10px 14px;
+        box-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
+        border: 1px solid #E0E0E0;
+    }
+    
+    .message-bubble {
+        font-size: 0.95em;
+        line-height: 1.4;
+        word-break: break-word;
     }
     
     .message-label {
-        font-weight: bold;
-        font-size: 0.85em;
-        margin-bottom: 4px;
-        opacity: 0.8;
-    }
-    
-    .message-content {
-        font-size: 0.95em;
-        line-height: 1.4;
+        font-weight: 600;
+        font-size: 0.8em;
+        margin-bottom: 3px;
+        opacity: 0.7;
+        padding: 0 14px;
+        margin-top: 5px;
     }
     
     .coaching-section {
@@ -160,7 +182,27 @@ if "session_id" not in st.session_state:
     st.session_state.conversational_audio_path = None
     st.session_state.speech_rate = 1.0
     st.session_state.speech_pitch = 1.0
-    st.session_state.last_audio_id = None
+    st.session_state.last_processed_audio_hash = None  # Track hash of last processed audio
+
+def compute_audio_hash(audio_data) -> str:
+    """Compute a hash of audio data to detect if it's new."""
+    import hashlib
+    try:
+        # Convert to bytes if needed
+        if hasattr(audio_data, 'read'):
+            # File-like object - read bytes and seek back to beginning
+            audio_bytes = audio_data.read()
+            if hasattr(audio_data, 'seek'):
+                audio_data.seek(0)  # Reset file pointer for later use
+        elif isinstance(audio_data, bytes):
+            audio_bytes = audio_data
+        else:
+            audio_bytes = bytes(audio_data)
+        
+        return hashlib.md5(audio_bytes).hexdigest()
+    except Exception as e:
+        print(f"[DEBUG] Error computing audio hash: {str(e)}")
+        return None
 
 # Helper functions
 def get_feedback_audio(session_id: str, audio_type: str = "coaching"):
@@ -190,11 +232,19 @@ def get_conversation_history(session_id: str):
             history = data.get("history", [])
             
             # Clean XML tags from all conversational responses
-            for turn in history:
+            for i, turn in enumerate(history):
                 if 'conversational' in turn:
-                    turn['conversational'] = strip_xml_tags(turn['conversational'])
+                    original = turn['conversational']
+                    cleaned = strip_xml_tags(original)
+                    if original != cleaned:
+                        print(f"[DEBUG] Turn {i} conversational: cleaned XML from {len(original)} to {len(cleaned)} chars")
+                    turn['conversational'] = cleaned
                 if 'coaching' in turn:
-                    turn['coaching'] = strip_xml_tags(turn['coaching'])
+                    original = turn['coaching']
+                    cleaned = strip_xml_tags(original)
+                    if original != cleaned:
+                        print(f"[DEBUG] Turn {i} coaching: cleaned XML from {len(original)} to {len(cleaned)} chars")
+                    turn['coaching'] = cleaned
             
             print(f"[DEBUG] Backend returned {len(history)} history items")
             return history
@@ -247,9 +297,20 @@ with col1:
     # Audio recording widget
     audio_data = st.audio_input("Click to record your speech", label_visibility="collapsed")
     
-    # Track if we've already processed this audio to avoid loops
-    if audio_data and not st.session_state.get("last_audio_id"):
+    # Check if we have NEW audio (different from the last one we processed)
+    should_process = False
+    current_audio_hash = None
+    
+    if audio_data:
+        current_audio_hash = compute_audio_hash(audio_data)
+        if current_audio_hash and current_audio_hash != st.session_state.last_processed_audio_hash:
+            should_process = True
+    
+    if should_process:
         st.success("✅ Audio recorded!")
+        
+        # Mark this audio as being processed IMMEDIATELY to prevent re-processing on rerun
+        st.session_state.last_processed_audio_hash = current_audio_hash
         
         # Process audio
         with st.spinner("Processing your speech... This may take 15-25 seconds"):
@@ -292,9 +353,6 @@ with col1:
                     st.session_state.coaching_audio_path = result.get("coaching_audio_path", "")
                     st.session_state.conversational_audio_path = result.get("conversational_audio_path", "")
                     
-                    # Mark this audio as processed to prevent loop
-                    st.session_state.last_audio_id = id(audio_data)
-                    
                     st.success("✅ Feedback generated!")
                     st.info(f"Backend returned: {len(result)} fields")
                     
@@ -325,30 +383,36 @@ with col2:
     if history:
         chat_html = '<div class="chat-container">'
         
-        for turn in history:
+        for i, turn in enumerate(history):
             user_input = turn.get('user', 'N/A')
-            conversational = strip_xml_tags(turn.get('conversational', 'N/A'))
+            conversational = turn.get('conversational', 'N/A')
             
-            # User message
-            chat_html += f'''
-            <div class="chat-message user-message">
-                <div style="flex: 1;">
-                    <div class="message-label">You</div>
-                    <div class="message-content">{user_input}</div>
-                </div>
-            </div>
-            '''
+            # Clean XML tags from both messages
+            user_input = strip_xml_tags(user_input) if user_input != 'N/A' else user_input
+            conversational = strip_xml_tags(conversational) if conversational != 'N/A' else conversational
             
-            # AI conversational message
+            # Debug: show what we're rendering
+            print(f"[DEBUG] Rendering turn {i}: user={user_input[:50]}... conversational={conversational[:50]}...")
+            
+            # Escape HTML special characters to prevent rendering issues
+            user_input_escaped = (user_input
+                .replace('&', '&amp;')
+                .replace('<', '&lt;')
+                .replace('>', '&gt;')
+                .replace('"', '&quot;'))
+            
+            conversational_escaped = (conversational
+                .replace('&', '&amp;')
+                .replace('<', '&lt;')
+                .replace('>', '&gt;')
+                .replace('"', '&quot;'))
+            
+            # User message (right-aligned bubble)
+            chat_html += f'''<div class="chat-message user-message"><div class="message-bubble">{user_input_escaped}</div></div>'''
+            
+            # AI conversational message (left-aligned bubble)
             if conversational and conversational != 'N/A':
-                chat_html += f'''
-                <div class="chat-message ai-message">
-                    <div style="flex: 1;">
-                        <div class="message-label">Assistant</div>
-                        <div class="message-content">{conversational}</div>
-                    </div>
-                </div>
-                '''
+                chat_html += f'''<div class="chat-message ai-message"><div class="message-bubble">{conversational_escaped}</div></div>'''
         
         chat_html += '</div>'
         st.markdown(chat_html, unsafe_allow_html=True)
@@ -429,7 +493,7 @@ with col2:
             st.session_state.transcript = None
             st.session_state.coaching_feedback = None
             st.session_state.conversational_response = None
-            st.session_state.last_audio_id = None  # Reset audio ID to allow new recording
+            st.session_state.last_processed_audio_hash = None  # Reset audio hash to allow new recording
             st.success("✅ New conversation!")
             st.rerun()
 
