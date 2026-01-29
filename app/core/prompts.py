@@ -50,8 +50,6 @@ CONCISE_FEEDBACK_SYSTEM_PROMPT = """You are an English coach with two distinct m
 - Each point is 1-2 sentences maximum
 - Focus on specific, fixable issues (pronunciation, grammar, word choice, phrasing)
 - Just the facts and fixes—no validation padding
-- IF THERE ARE IMPROVEMENTS: At the end of the feedback section, add a blank line and then show the rewritten version with a label like "Better version: [rewritten text]"
-- IF NO IMPROVEMENTS NEEDED: Simply write "Your text is excellent! No changes needed."
 
 **CONVERSATION MODE (proactive & curious):**
 - Ask genuine follow-up questions about what the user just shared
@@ -141,22 +139,40 @@ Keep it natural, brief (under 60 words), and genuinely curious. Sound like a fri
 def get_concise_feedback_prompt(user_text: str, conversation_history=None) -> str:
     """
     Generate a concise, direct feedback prompt for Ollama.
-    Lists improvements straight to the point and includes rewritten text at the end of coaching.
+    Lists improvements straight to the point AND provides a proactive conversational response.
     
     Args:
         user_text: The user's transcribed speech
         conversation_history: Previous conversation turns (optional)
         
     Returns:
-        Formatted prompt for direct, actionable feedback with rewritten text and conversational engagement
+        Formatted prompt for direct, actionable feedback with topic rotation guidance
     """
     context_text = ""
+    topic_guidance = ""
     if conversation_history:
-        context_text = "\n\nRECENT CONTEXT:\n"
-        for i, turn in enumerate(conversation_history[-3:], 1):
-            context_text += f"- Turn {i}: User said '{turn['user'][:40]}...'\n"
+        context_text = "\n\nRECENT CONVERSATION CONTEXT (last 4 turns):\n"
+        for i, turn in enumerate(conversation_history[-4:], 1):
+            context_text += f"Turn {i}: User said '{turn['user'][:50]}...'\n"
+        
+        # Analyze topics for rotation guidance
+        recent_turns = [turn['user'] for turn in conversation_history[-4:]]
+        topics = []
+        for turn in recent_turns:
+            if any(word in turn.lower() for word in ['work', 'job', 'project', 'boss', 'office', 'career']):
+                topics.append('work')
+            elif any(word in turn.lower() for word in ['game', 'movie', 'show', 'watch', 'read', 'hobby']):
+                topics.append('hobbies')
+            elif any(word in turn.lower() for word in ['family', 'friend', 'parent', 'sibling', 'social']):
+                topics.append('social')
+            elif any(word in turn.lower() for word in ['learn', 'study', 'improve', 'practice']):
+                topics.append('learning')
+        
+        # Detect topic fatigue
+        if len(topics) >= 3 and topics[-3:].count(topics[-1]) >= 2:
+            topic_guidance = "\n\nTOPIC ROTATION ALERT: Recent conversation has focused heavily on the same topic. Use the 'Soft Pivot' technique to smoothly transition to a different life domain (Hobbies, Social Circle, Health, Local Environment, Personal Growth). This keeps conversations dynamic and engaging!"
     
-    prompt = f"""Analyze this speech and provide TWO sections.{context_text}
+    prompt = f"""Analyze this speech and provide TWO separate sections.{context_text}{topic_guidance}
 
 USER JUST SAID: "{user_text}"
 
@@ -164,18 +180,12 @@ RESPOND WITH TWO SECTIONS (both required, clearly separated):
 
 ---COACHING---
 List improvements directly and concisely:
-- Use bullet points for each improvement
+- Use bullet points
 - 1-2 sentences per point maximum
 - Focus only on: pronunciation, grammar, word choice, phrasing
 - Be specific and actionable
 - Skip validation statements
-
-IF THERE ARE IMPROVEMENTS:
-After listing all improvements, add a blank line and then write:
-"Better version: [rewritten text with all improvements applied]"
-
-IF NO IMPROVEMENTS ARE NEEDED:
-Simply write: "Your text is excellent! No changes needed."
+- If correct, write: "No improvements needed. Well done!"
 
 ---CONVERSATION---
 Respond proactively and curiously to what they said:
@@ -183,9 +193,12 @@ Respond proactively and curiously to what they said:
 - Reference context from earlier if available
 - Show you're interested in their learning journey
 - Be warm but brief (2-3 sentences)
-- Examples: "That's great! Are you learning English for work? What field are you in?"
+- VARY TOPICS: Use the "Soft Pivot" technique if the same topic repeats
+  * Formula: [Validate current topic] + [Briefly conclude] + [Pivot to new domain]
+  * Example: "That sounds intense! Since you're working so hard, what do you usually do to unwind? Any hobbies or shows you're into?"
+- Available life domains to explore: Work/Career, Hobbies/Entertainment, Social Life/Relationships, Personal Growth/Learning, Health/Wellness, Local Environment
 
-PROVIDE BOTH SECTIONS NOW:
+PROVIDE BOTH SECTIONS NOW WITH CLEAR BULLET POINT FORMATTING:
 """
     
     return prompt
