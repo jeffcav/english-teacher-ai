@@ -418,9 +418,11 @@ Respond naturally to what the user said, as if you were their friend having a co
             print(f"[TTS] Speaking text: {filtered_text[:100]}...")
             
             # Generate speech with English-specific settings
+            # Speed 1.5 = 50% faster than normal (speeds up TTS output)
             tts.tts_to_file(
                 text=filtered_text,
-                file_path=output_file
+                file_path=output_file,
+                speed=1.5
             )
             
             print(f"[TTS] Speech synthesis completed (English-only mode)")

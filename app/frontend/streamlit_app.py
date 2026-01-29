@@ -419,7 +419,7 @@ with col2:
         try:
             conv_audio = get_feedback_audio(st.session_state.session_id, "conversational")
             if conv_audio:
-                st.audio(conv_audio, format="audio/wav")
+                st.audio(conv_audio, format="audio/wav", autoplay=True)
             else:
                 st.info("No conversational audio yet")
         except:
