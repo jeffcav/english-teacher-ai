@@ -20,6 +20,7 @@ from app.core.config import (
     SYSTEM_PROMPT,
     OLLAMA_BASE_URL,
 )
+from app.core.prompts import get_proactive_coaching_prompt, PROACTIVE_CURIOSITY_SYSTEM_PROMPT
 
 
 class PhonicFlowArchitect:
@@ -288,31 +289,13 @@ class PhonicFlowArchitect:
             return ("No speech detected. Please try again with a clearer audio input.", "")
 
         try:
-            # Build conversation context if history exists
-            context_text = ""
-            if conversation_history:
-                context_text = "\n\nCONVERSATION CONTEXT (previous exchanges):\n"
-                for i, turn in enumerate(conversation_history[-3:], 1):  # Last 3 turns for context
-                    context_text += f"Turn {i}:\n"
-                    context_text += f"  User: {turn['user']}\n"
-                    context_text += f"  Your conversational response: {turn['conversational']}\n"
-            
-            prompt = f"""Analyze the user's speech and provide TWO separate responses.{context_text}
-
-CURRENT USER INPUT: "{user_text}"
-
-RESPONSE FORMAT (clearly separate both parts):
----COACHING---
-Provide feedback on pronunciation, grammar, and naturalness. Keep it under 50 words. Be encouraging. Reference context if relevant.
-
----CONVERSATION---
-Respond naturally to what the user said, as if you were their friend having a conversation. Use context from previous exchanges. Keep it natural and conversational (under 50 words).
-"""
+            # Use the proactive curiosity prompt
+            prompt = get_proactive_coaching_prompt(user_text, conversation_history)
             
             response = ollama.chat(
                 model=self.llm_name,
                 messages=[
-                    {'role': 'system', 'content': "You are an English tutor and friendly conversationalist. Maintain conversation continuity by referring to previous exchanges when relevant."},
+                    {'role': 'system', 'content': PROACTIVE_CURIOSITY_SYSTEM_PROMPT},
                     {'role': 'user', 'content': prompt}
                 ],
                 stream=False

@@ -30,8 +30,6 @@ SUPPORTED_AUDIO_FORMATS = ["wav", "mp3", "m4a", "flac"]
 MAX_AUDIO_DURATION = 300  # seconds (5 minutes)
 
 # System prompt for LLM coaching
-SYSTEM_PROMPT = """You are an expert English Phonetic Coach. The user will provide a transcription of their speech. Your job is to:
-1. Identify likely pronunciation errors based on the text.
-2. Suggest a more 'Native Way' to express the thought.
-3. Keep your response concise (under 60 words).
-4. Be encouraging and supportive in your feedback."""
+# Import the proactive curiosity prompt from prompts.py
+from app.core.prompts import PROACTIVE_CURIOSITY_SYSTEM_PROMPT
+SYSTEM_PROMPT = PROACTIVE_CURIOSITY_SYSTEM_PROMPT
