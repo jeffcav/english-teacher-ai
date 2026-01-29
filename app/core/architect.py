@@ -14,6 +14,7 @@ import numpy as np
 import wave
 from typing import Optional, List, Dict, Tuple
 import kokoro
+import librosa
 from app.models.schemas import FeedbackResponse
 from app.core.config import (
     FEEDBACK_DIR,
@@ -39,7 +40,7 @@ class PhonicFlowArchitect:
     @staticmethod
     def _filter_english_only(text: str) -> str:
         """
-        Filter text to keep only valid English characters for TTS.
+        Filter text to keep only valid English and Brazilian Portuguese characters for TTS.
         Preserves letters, numbers, common punctuation, and safe Unicode characters.
         Removes HTML/XML tags and control characters.
         
@@ -47,16 +48,19 @@ class PhonicFlowArchitect:
             text: Text potentially containing non-English or invalid characters
             
         Returns:
-            Text with only valid English characters for TTS
+            Text with only valid English and Portuguese characters for TTS
         """
         if not text or not isinstance(text, str):
             return ""
         
         import unicodedata
         
-        # Keep English letters, numbers, spaces, and extended punctuation
+        # Keep English letters, Brazilian Portuguese letters, numbers, spaces, and extended punctuation
+        # Portuguese chars: ã, õ, ç, á, é, í, ó, ú, à, â, ô (and uppercase versions)
         allowed_chars = set(
-            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,;:!?'\"-()&\n\t"
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            "áéíóúàâôãõçÁÉÍÓÚÀÂÔÃÕÇ"
+            "0123456789 .,;:!?'\"-()&\n\t"
         )
         
         # Also allow common Unicode punctuation and symbols that TTS can handle
@@ -74,6 +78,54 @@ class PhonicFlowArchitect:
         filtered = re.sub(r'\s+', ' ', filtered)
         
         return filtered.strip()
+
+    @staticmethod
+    def _detect_speaker_gender(audio_file_path: str) -> str:
+        """
+        Estimate speaker gender from audio using fundamental frequency analysis.
+        
+        Male voices typically have lower fundamental frequency (80-180 Hz)
+        Female voices typically have higher fundamental frequency (160-300 Hz)
+        
+        Args:
+            audio_file_path: Path to audio file
+            
+        Returns:
+            'male' or 'female' based on estimated pitch
+        """
+        try:
+            # Load audio file
+            y, sr = librosa.load(audio_file_path, sr=None)
+            
+            # Extract fundamental frequency using piptrack algorithm
+            # This is more robust than simple pitch detection
+            f0 = librosa.yin(y, fmin=60, fmax=400, sr=sr)
+            
+            # Filter out unvoiced frames (f0 == 0)
+            f0_voiced = f0[f0 > 0]
+            
+            if len(f0_voiced) == 0:
+                print(f"[GENDER] No voiced frames detected, defaulting to female")
+                return "female"
+            
+            # Calculate median fundamental frequency
+            median_f0 = np.median(f0_voiced)
+            mean_f0 = np.mean(f0_voiced)
+            
+            print(f"[GENDER] Median F0: {median_f0:.1f} Hz, Mean F0: {mean_f0:.1f} Hz")
+            
+            # Threshold: around 150 Hz separates male/female well
+            # Below 150 Hz -> likely male, above 150 Hz -> likely female
+            if median_f0 < 150:
+                print(f"[GENDER] Detected as MALE (F0 < 150 Hz)")
+                return "male"
+            else:
+                print(f"[GENDER] Detected as FEMALE (F0 >= 150 Hz)")
+                return "female"
+                
+        except Exception as e:
+            print(f"[GENDER] Error detecting gender: {str(e)}, defaulting to female")
+            return "female"
 
     @staticmethod
     def _strip_xml_tags(text: str) -> str:
@@ -350,7 +402,8 @@ class PhonicFlowArchitect:
         self,
         feedback_text: str,
         output_name: str,
-        feedback_type: str = "coaching"
+        feedback_type: str = "coaching",
+        speaker_gender: str = "female"
     ) -> str:
         """
         Step 3: Convert LLM feedback into audio for the user.
@@ -359,10 +412,13 @@ class PhonicFlowArchitect:
         - Coaching feedback: Portuguese language
         - Conversational feedback: English language
         
+        Selects gender-appropriate voices based on detected speaker gender.
+        
         Args:
             feedback_text: Text to synthesize into speech
             output_name: Session ID or unique identifier for output file
             feedback_type: Type of feedback ("coaching" or "conversational")
+            speaker_gender: Detected speaker gender ("male" or "female")
             
             Returns:
             Path to the generated WAV file
@@ -378,7 +434,7 @@ class PhonicFlowArchitect:
             
             # Run Kokoro TTS in a thread pool to avoid blocking the async context
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self._synthesize_with_kokoro, feedback_text, str(output_path), feedback_type)
+            await loop.run_in_executor(None, self._synthesize_with_kokoro, feedback_text, str(output_path), feedback_type, speaker_gender)
             
             # Verify file was created
             if output_path.exists() and output_path.stat().st_size > 0:
@@ -392,17 +448,19 @@ class PhonicFlowArchitect:
             print(f"[TTS] ERROR: {str(e)}")
             raise Exception(f"TTS synthesis failed: {str(e)}")
 
-    def _synthesize_with_kokoro(self, text: str, output_file: str, feedback_type: str = "coaching") -> None:
+    def _synthesize_with_kokoro(self, text: str, output_file: str, feedback_type: str = "coaching", speaker_gender: str = "female") -> None:
         """
         Helper method to run Kokoro TTS synthesis with multilingual CUDA support.
         Executed in a thread pool to avoid blocking.
         - Coaching feedback: Portuguese language
         - Conversational feedback: English language
+        - Voice selection: Male or female based on detected speaker gender
         
         Args:
             text: Text to synthesize
             output_file: Output file path
             feedback_type: Type of feedback ("coaching" for Portuguese, "conversational" for English)
+            speaker_gender: Speaker gender ("male" or "female") for voice selection
         """
         try:
             print(f"[TTS] Original text: {text[:100]}...")
@@ -422,15 +480,29 @@ class PhonicFlowArchitect:
                 print(f"[TTS] WARNING: Text was filtered from {len(text)} to {len(filtered_text)} chars")
                 print(f"[TTS] Removed {len(text) - len(filtered_text)} characters")
             
-            # Determine language code and voice based on feedback type
+            # Determine language code and voice based on feedback type and speaker gender
             if feedback_type == "coaching":
                 lang_code = "p"      # Portuguese (Brazil)
-                voice = "pf_dora"     # Portuguese male voice
+                # Select Portuguese voice opposite to detected speaker gender
+                if speaker_gender.lower() == "male":
+                    voice = "pf_dora"     # Female voice (opposite of male speaker)
+                    voice_name = "female (Dora)"
+                else:
+                    voice = "pm_alex"     # Male voice (opposite of female speaker)
+                    voice_name = "male (Alex)"
                 lang_name = "Portuguese"
             else:
                 lang_code = "a"      # English (American)
-                voice = "af_heart"    # English female voice
+                # Select English voice opposite to detected speaker gender
+                if speaker_gender.lower() == "male":
+                    voice = "af_heart"    # Female voice (opposite of male speaker)
+                    voice_name = "female (Heart)"
+                else:
+                    voice = "am_michael"  # Male voice (opposite of female speaker)
+                    voice_name = "male (Michael)"
                 lang_name = "English"
+            
+            print(f"[TTS] Selected {lang_name} {voice_name} voice for {speaker_gender} speaker")
             
             print(f"[TTS] Initializing Kokoro TTS engine with CUDA support ({lang_name})...")
             
@@ -483,6 +555,9 @@ class PhonicFlowArchitect:
         1. Coaching feedback on correctness and naturality
         2. Conversational response as if responding to a friend
         
+        Automatically detects speaker gender from audio and selects appropriate
+        male/female voices for TTS feedback synthesis.
+        
         Args:
             input_audio_path: Path to user's recorded audio
             session_id: Unique session identifier
@@ -494,6 +569,10 @@ class PhonicFlowArchitect:
             FileNotFoundError: If audio file doesn't exist
         """
         try:
+            # Step 0: Detect speaker gender from audio
+            speaker_gender = self._detect_speaker_gender(input_audio_path)
+            print(f"[PIPELINE] Detected speaker gender: {speaker_gender}")
+            
             # Step 1: Speech to Text
             transcript = self.transcribe_speech(input_audio_path)
             
@@ -506,9 +585,9 @@ class PhonicFlowArchitect:
                 conversation_history
             )
             
-            # Step 4: Both responses to Speech (TTS)
-            coaching_audio_path = await self.synthesize_feedback(coaching_text, session_id, "coaching")
-            conversational_audio_path = await self.synthesize_feedback(conversational_text, session_id, "conversational")
+            # Step 4: Both responses to Speech (TTS) with gender-appropriate voices
+            coaching_audio_path = await self.synthesize_feedback(coaching_text, session_id, "coaching", speaker_gender=speaker_gender)
+            conversational_audio_path = await self.synthesize_feedback(conversational_text, session_id, "conversational", speaker_gender=speaker_gender)
             
             # Step 5: Save this turn to conversation history
             self.save_conversation_turn(
