@@ -55,7 +55,7 @@ st.set_page_config(
     page_title="PhonicFlow - English Tutor",
     page_icon="🎤",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 # Custom CSS
@@ -180,8 +180,6 @@ if "session_id" not in st.session_state:
     st.session_state.conversational_response = None
     st.session_state.coaching_audio_path = None
     st.session_state.conversational_audio_path = None
-    st.session_state.speech_rate = 1.0
-    st.session_state.speech_pitch = 1.0
     st.session_state.last_processed_audio_hash = None  # Track hash of last processed audio
 
 def compute_audio_hash(audio_data) -> str:
@@ -258,35 +256,6 @@ def get_conversation_history(session_id: str):
 # Header
 st.markdown('<div class="main-title">🎤 PhonicFlow</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">Your Personal English Pronunciation Coach</div>', unsafe_allow_html=True)
-
-# Sidebar configuration
-with st.sidebar:
-    st.header("⚙️ Settings")
-    
-    st.subheader("📊 Speech Control")
-    st.session_state.speech_rate = st.slider(
-        "Speech Rate",
-        min_value=0.5,
-        max_value=2.0,
-        value=st.session_state.speech_rate,
-        step=0.1
-    )
-    st.session_state.speech_pitch = st.slider(
-        "Speech Pitch",
-        min_value=0.5,
-        max_value=2.0,
-        value=st.session_state.speech_pitch,
-        step=0.1
-    )
-    
-    st.subheader("ℹ️ About")
-    st.info(
-        "**PhonicFlow** uses AI to help you improve your English pronunciation. "
-        "Record your speech, and get personalized coaching from your AI tutor!"
-    )
-    
-    st.subheader("🔧 Session Info")
-    st.code(st.session_state.session_id, language="")
 
 # Main content
 col1, col2 = st.columns([1, 2])
