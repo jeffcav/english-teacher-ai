@@ -32,5 +32,39 @@ services:
     command: >
       sh -c "python -m uvicorn app.backend.main:app --host 0.0.0.0 --port 8000 --reload"
 
+  # PhonicFlow Telegram Bot
+  telegram_bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.telegram_bot
+    container_name: phonic_flow_telegram_bot
+    depends_on:
+      - backend
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - BACKEND_URL=http://backend:8000
+      - BACKEND_TIMEOUT=30
+      - BOT_POLLING_INTERVAL=1
+      - BOT_POLLING_TIMEOUT=30
+      - SESSION_TIMEOUT_HOURS=24
+      - SESSION_STORAGE_PATH=app/feedback_storage
+      - LOG_LEVEL=INFO
+      - BOT_LOG_FILE=logs/telegram_bot.log
+    volumes:
+      - ./app/feedback_storage:/app/app/feedback_storage
+      - ./logs:/app/logs
+    networks:
+      - backend
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   ollama_data:
+
+networks:
+  backend:
+    driver: bridge

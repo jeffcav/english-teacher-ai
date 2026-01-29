@@ -16,3 +16,5 @@ deep-translator==1.11.4
 f5-tts
 transformers>=4.30.0
 gTTS>=2.3.2
+python-telegram-bot==20.0
+pydub==0.25.1
