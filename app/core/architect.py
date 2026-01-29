@@ -8,9 +8,12 @@ import json
 import re
 import whisper
 import ollama
-from TTS.api import TTS
 from pathlib import Path
+import torch
+import numpy as np
+import wave
 from typing import Optional, List, Dict, Tuple
+import kokoro
 from app.models.schemas import FeedbackResponse
 from app.core.config import (
     FEEDBACK_DIR,
@@ -30,7 +33,7 @@ class PhonicFlowArchitect:
     Coordinates three AI engines:
     - Whisper (STT): Transcribes speech to text
     - Ollama (LLM): Analyzes and provides coaching
-    - CoquiTTS (TTS): Synthesizes audio feedback (English only)
+    - Kokoro (TTS): Synthesizes audio feedback with multilingual support
     """
 
     @staticmethod
@@ -352,14 +355,16 @@ class PhonicFlowArchitect:
         """
         Step 3: Convert LLM feedback into audio for the user.
         
-        Uses CoquiTTS for local, offline text-to-speech synthesis.
+        Uses Kokoro TTS for high-quality local text-to-speech synthesis with CUDA support.
+        - Coaching feedback: Portuguese language
+        - Conversational feedback: English language
         
         Args:
             feedback_text: Text to synthesize into speech
             output_name: Session ID or unique identifier for output file
             feedback_type: Type of feedback ("coaching" or "conversational")
             
-        Returns:
+            Returns:
             Path to the generated WAV file
         """
         output_path = self.feedback_dir / f"{output_name}_{feedback_type}.wav"
@@ -371,9 +376,9 @@ class PhonicFlowArchitect:
             
             print(f"[TTS] Synthesizing {feedback_type} feedback ({len(feedback_text)} chars) to {output_path}")
             
-            # Run CoquiTTS in a thread pool to avoid blocking the async context
+            # Run Kokoro TTS in a thread pool to avoid blocking the async context
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self._synthesize_with_coqui, feedback_text, str(output_path))
+            await loop.run_in_executor(None, self._synthesize_with_kokoro, feedback_text, str(output_path), feedback_type)
             
             # Verify file was created
             if output_path.exists() and output_path.stat().st_size > 0:
@@ -387,22 +392,24 @@ class PhonicFlowArchitect:
             print(f"[TTS] ERROR: {str(e)}")
             raise Exception(f"TTS synthesis failed: {str(e)}")
 
-    def _synthesize_with_coqui(self, text: str, output_file: str) -> None:
+    def _synthesize_with_kokoro(self, text: str, output_file: str, feedback_type: str = "coaching") -> None:
         """
-        Helper method to run CoquiTTS synthesis with English-only configuration.
+        Helper method to run Kokoro TTS synthesis with multilingual CUDA support.
         Executed in a thread pool to avoid blocking.
-        Non-English characters are filtered out before synthesis.
+        - Coaching feedback: Portuguese language
+        - Conversational feedback: English language
         
         Args:
             text: Text to synthesize
             output_file: Output file path
+            feedback_type: Type of feedback ("coaching" for Portuguese, "conversational" for English)
         """
         try:
             print(f"[TTS] Original text: {text[:100]}...")
             print(f"[TTS] Original text length: {len(text)}")
             print(f"[TTS] Original text bytes: {text.encode('utf-8')[:100]}")
             
-            # Filter out problematic characters
+            # Filter out problematic characters (markdown, special chars, etc.)
             filtered_text = self._filter_english_only(text)
             
             if not filtered_text or len(filtered_text.strip()) == 0:
@@ -415,27 +422,51 @@ class PhonicFlowArchitect:
                 print(f"[TTS] WARNING: Text was filtered from {len(text)} to {len(filtered_text)} chars")
                 print(f"[TTS] Removed {len(text) - len(filtered_text)} characters")
             
-            print(f"[TTS] Initializing CoquiTTS engine (English model)...")
+            # Determine language code and voice based on feedback type
+            if feedback_type == "coaching":
+                lang_code = "p"      # Portuguese (Brazil)
+                voice = "pf_dora"     # Portuguese male voice
+                lang_name = "Portuguese"
+            else:
+                lang_code = "a"      # English (American)
+                voice = "af_heart"    # English female voice
+                lang_name = "English"
             
-            # Initialize TTS model with English-only configuration
-            # Using ljspeech model: English female voice, high quality
-            tts = TTS(
-                model_name="tts_models/en/ljspeech/glow-tts",
-                gpu=False  # Set gpu=True if CUDA is available
-            )
+            print(f"[TTS] Initializing Kokoro TTS engine with CUDA support ({lang_name})...")
             
-            print(f"[TTS] Speaking text: {filtered_text[:100]}...")
+            # Check CUDA availability
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            print(f"[TTS] Using device: {device}")
+            if device == "cuda":
+                print(f"[TTS] CUDA device: {torch.cuda.get_device_name(0)}")
             
-            # Generate speech with English-specific settings
-            tts.tts_to_file(
-                text=filtered_text,
-                file_path=output_file
-            )
+            print(f"[TTS] Speaking text in {lang_name}: {filtered_text[:100]}...")
             
-            print(f"[TTS] Speech synthesis completed successfully")
+            # Create Kokoro pipeline and generate speech
+            # Kokoro API: KPipeline(lang_code, device) returns generator of Results
+            # Each result has .audio (torch tensor) and .phonemes
+            pipeline = kokoro.KPipeline(lang_code=lang_code, device=device)
+            
+            # Collect audio from all results
+            import wave
+            with wave.open(output_file, "wb") as wav_file:
+                wav_file.setnchannels(1)      # Mono audio
+                wav_file.setsampwidth(2)      # 2 bytes per sample (16-bit audio)
+                wav_file.setframerate(24000)  # Sample rate (Kokoro standard)
+                
+                # Generate speech - pipeline returns generator of results
+                for result in pipeline(filtered_text, voice=voice, speed=1.0, split_pattern=r"\n+"):
+                    if result.audio is None:
+                        continue
+                    # Convert torch tensor to numpy, then to 16-bit integer audio
+                    audio_np = result.audio.numpy()
+                    audio_int16 = (audio_np * 32767).astype(np.int16)
+                    wav_file.writeframes(audio_int16.tobytes())
+            
+            print(f"[TTS] Speech synthesis completed successfully in {lang_name}")
             
         except Exception as e:
-            print(f"[TTS] Error in _synthesize_with_coqui: {str(e)}")
+            print(f"[TTS] Error in _synthesize_with_kokoro: {str(e)}")
             print(f"[TTS] Attempted to synthesize: {text[:100]}")
             raise
 
