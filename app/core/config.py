@@ -14,7 +14,7 @@ FEEDBACK_DIR.mkdir(exist_ok=True)
 
 # Model configurations
 DEFAULT_WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base.en")
-DEFAULT_LLM_NAME = os.getenv("LLM_NAME", "gemma3:27b")
+DEFAULT_LLM_NAME = os.getenv("LLM_NAME", "phi4:latest")
 DEFAULT_TTS_VOICE = os.getenv("TTS_VOICE", "pyttsx3_default")  # Local pyttsx3 (no Edge-TTS needed)
 
 # Ollama configuration
