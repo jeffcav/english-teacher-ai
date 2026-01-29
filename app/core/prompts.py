@@ -50,6 +50,8 @@ CONCISE_FEEDBACK_SYSTEM_PROMPT = """You are an English coach with two distinct m
 - Each point is 1-2 sentences maximum
 - Focus on specific, fixable issues (pronunciation, grammar, word choice, phrasing)
 - Just the facts and fixes—no validation padding
+- IF THERE ARE IMPROVEMENTS: At the end of the feedback section, add a blank line and then show the rewritten version with a label like "Better version: [rewritten text]"
+- IF NO IMPROVEMENTS NEEDED: Simply write "Your text is excellent! No changes needed."
 
 **CONVERSATION MODE (proactive & curious):**
 - Ask genuine follow-up questions about what the user just shared
@@ -139,14 +141,14 @@ Keep it natural, brief (under 60 words), and genuinely curious. Sound like a fri
 def get_concise_feedback_prompt(user_text: str, conversation_history=None) -> str:
     """
     Generate a concise, direct feedback prompt for Ollama.
-    Lists improvements straight to the point AND provides a proactive conversational response.
+    Lists improvements straight to the point and includes rewritten text at the end of coaching.
     
     Args:
         user_text: The user's transcribed speech
         conversation_history: Previous conversation turns (optional)
         
     Returns:
-        Formatted prompt for direct, actionable feedback with conversational engagement
+        Formatted prompt for direct, actionable feedback with rewritten text and conversational engagement
     """
     context_text = ""
     if conversation_history:
@@ -154,7 +156,7 @@ def get_concise_feedback_prompt(user_text: str, conversation_history=None) -> st
         for i, turn in enumerate(conversation_history[-3:], 1):
             context_text += f"- Turn {i}: User said '{turn['user'][:40]}...'\n"
     
-    prompt = f"""Analyze this speech and provide TWO separate sections.{context_text}
+    prompt = f"""Analyze this speech and provide TWO sections.{context_text}
 
 USER JUST SAID: "{user_text}"
 
@@ -162,12 +164,18 @@ RESPOND WITH TWO SECTIONS (both required, clearly separated):
 
 ---COACHING---
 List improvements directly and concisely:
-- Use bullet points
+- Use bullet points for each improvement
 - 1-2 sentences per point maximum
 - Focus only on: pronunciation, grammar, word choice, phrasing
 - Be specific and actionable
 - Skip validation statements
-- If correct, write: "No improvements needed. Well done!"
+
+IF THERE ARE IMPROVEMENTS:
+After listing all improvements, add a blank line and then write:
+"Better version: [rewritten text with all improvements applied]"
+
+IF NO IMPROVEMENTS ARE NEEDED:
+Simply write: "Your text is excellent! No changes needed."
 
 ---CONVERSATION---
 Respond proactively and curiously to what they said:
