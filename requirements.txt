@@ -10,6 +10,9 @@ requests==2.31.0
 numpy==1.26.4
 scipy==1.11.4
 whisper==1.1.10
-coqui-tts[codec]
-coqui-tts[languages]
+torch>=2.0.0
 torchaudio
+deep-translator==1.11.4
+f5-tts
+transformers>=4.30.0
+gTTS>=2.3.2

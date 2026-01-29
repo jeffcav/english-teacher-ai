@@ -180,6 +180,8 @@ if "session_id" not in st.session_state:
     st.session_state.conversational_response = None
     st.session_state.coaching_audio_path = None
     st.session_state.conversational_audio_path = None
+    st.session_state.coaching_feedback_portuguese = None
+    st.session_state.conversational_response_portuguese = None
     st.session_state.last_processed_audio_hash = None  # Track hash of last processed audio
 
 def compute_audio_hash(audio_data) -> str:
@@ -257,10 +259,12 @@ def get_conversation_history(session_id: str):
 st.markdown('<div class="main-title">🎤 PhonicFlow</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">Your Personal English Pronunciation Coach</div>', unsafe_allow_html=True)
 
-# Main content
-col1, col2 = st.columns([1, 2])
+st.divider()
 
-with col1:
+# Top section with recording and audio playback side by side
+top_col1, top_col2 = st.columns([1, 1])
+
+with top_col1:
     st.subheader("🎤 Record Audio")
     
     # Audio recording widget
@@ -276,171 +280,76 @@ with col1:
             should_process = True
     
     if should_process:
-        st.success("✅ Audio recorded!")
-        
         # Mark this audio as being processed IMMEDIATELY to prevent re-processing on rerun
         st.session_state.last_processed_audio_hash = current_audio_hash
         
-        # Process audio
-        with st.spinner("Processing your speech... This may take 15-25 seconds"):
-            try:
-                # Handle audio_data properly (might be bytes or file-like object)
-                if hasattr(audio_data, 'read'):
-                    # File-like object
-                    audio_bytes = audio_data.read()
-                elif isinstance(audio_data, bytes):
-                    # Raw bytes
-                    audio_bytes = audio_data
-                else:
-                    # Try to convert to bytes
-                    audio_bytes = bytes(audio_data)
-                
-                # Save audio to temporary file
-                audio_path = "/tmp/user_audio.wav"
-                with open(audio_path, "wb") as f:
-                    f.write(audio_bytes)
-                
-                # Send to backend
-                with open(audio_path, "rb") as audio_file:
-                    files = {"file": audio_file}
-                    
-                    # Send session_id as query parameter
-                    response = requests.post(
-                        f"{API_BASE_URL}/process",
-                        params={"session_id": st.session_state.session_id},
-                        files=files,
-                        timeout=60
-                    )
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    
-                    # Store results in session state (clean XML tags if present)
-                    st.session_state.transcript = result.get("user_transcript", "")
-                    st.session_state.coaching_feedback = strip_xml_tags(result.get("coaching_feedback", ""))
-                    st.session_state.conversational_response = strip_xml_tags(result.get("conversational_response", ""))
-                    st.session_state.coaching_audio_path = result.get("coaching_audio_path", "")
-                    st.session_state.conversational_audio_path = result.get("conversational_audio_path", "")
-                    
-                    st.success("✅ Feedback generated!")
-                    st.info(f"Backend returned: {len(result)} fields")
-                    
-                    # Display results immediately in this run
-                    with st.expander("📊 Current Results", expanded=True):
-                        st.write("**Your Speech:**", st.session_state.transcript)
-                        st.write("**Coaching Feedback:**", st.session_state.coaching_feedback)
-                        st.write("**Conversational Response:**", st.session_state.conversational_response)
-                    
-                    time.sleep(1)  # Brief pause to show results
-                    st.rerun()
-                else:
-                    st.error(f"Backend error: {response.status_code}")
-                    st.error(response.text)
+        # Process audio silently in background
+        try:
+            # Handle audio_data properly (might be bytes or file-like object)
+            if hasattr(audio_data, 'read'):
+                # File-like object
+                audio_bytes = audio_data.read()
+            elif isinstance(audio_data, bytes):
+                # Raw bytes
+                audio_bytes = audio_data
+            else:
+                # Try to convert to bytes
+                audio_bytes = bytes(audio_data)
             
-            except Exception as e:
-                st.error(f"Error processing audio: {str(e)}")
+            # Save audio to temporary file
+            audio_path = "/tmp/user_audio.wav"
+            with open(audio_path, "wb") as f:
+                f.write(audio_bytes)
+            
+            # Send to backend
+            with open(audio_path, "rb") as audio_file:
+                files = {"file": audio_file}
+                
+                # Send session_id as query parameter
+                response = requests.post(
+                    f"{API_BASE_URL}/process",
+                    params={"session_id": st.session_state.session_id},
+                    files=files,
+                    timeout=60
+                )
+            
+            if response.status_code == 200:
+                result = response.json()
+                
+                # Store results in session state (clean XML tags if present)
+                st.session_state.transcript = result.get("user_transcript", "")
+                st.session_state.coaching_feedback = strip_xml_tags(result.get("coaching_feedback", ""))
+                st.session_state.conversational_response = strip_xml_tags(result.get("conversational_response", ""))
+                st.session_state.coaching_audio_path = result.get("coaching_audio_path", "")
+                st.session_state.conversational_audio_path = result.get("conversational_audio_path", "")
+                st.session_state.coaching_feedback_portuguese = result.get("coaching_feedback_portuguese", "")
+                st.session_state.conversational_response_portuguese = result.get("conversational_response_portuguese", "")
+                
+                st.rerun()
+        
+        except Exception as e:
+            pass
 
-with col2:
-    st.subheader("💬 Conversation Thread")
-    
-    # Load and display conversation history as chat
-    history = get_conversation_history(st.session_state.session_id)
-    
-    # Debug info
-    st.caption(f"Session: {st.session_state.session_id[-8:]}... | History items: {len(history)}")
-    
-    if history:
-        chat_html = '<div class="chat-container">'
-        
-        for i, turn in enumerate(history):
-            user_input = turn.get('user', 'N/A')
-            conversational = turn.get('conversational', 'N/A')
-            
-            # Clean XML tags from both messages
-            user_input = strip_xml_tags(user_input) if user_input != 'N/A' else user_input
-            conversational = strip_xml_tags(conversational) if conversational != 'N/A' else conversational
-            
-            # Debug: show what we're rendering
-            print(f"[DEBUG] Rendering turn {i}: user={user_input[:50]}... conversational={conversational[:50]}...")
-            
-            # Escape HTML special characters to prevent rendering issues
-            user_input_escaped = (user_input
-                .replace('&', '&amp;')
-                .replace('<', '&lt;')
-                .replace('>', '&gt;')
-                .replace('"', '&quot;'))
-            
-            conversational_escaped = (conversational
-                .replace('&', '&amp;')
-                .replace('<', '&lt;')
-                .replace('>', '&gt;')
-                .replace('"', '&quot;'))
-            
-            # User message (right-aligned bubble)
-            chat_html += f'''<div class="chat-message user-message"><div class="message-bubble">{user_input_escaped}</div></div>'''
-            
-            # AI conversational message (left-aligned bubble)
-            if conversational and conversational != 'N/A':
-                chat_html += f'''<div class="chat-message ai-message"><div class="message-bubble">{conversational_escaped}</div></div>'''
-        
-        chat_html += '</div>'
-        st.markdown(chat_html, unsafe_allow_html=True)
-    else:
-        st.warning("⏳ No conversation history yet. If you just recorded audio, the backend may still be processing it.")
-    
-    st.divider()
-    
-    # Coaching feedback section
-    st.subheader("📋 Coaching & Learning")
-    
-    if history:
-        for i, turn in enumerate(history, 1):
-            coaching = turn.get('coaching', None)
-            if coaching:
-                with st.expander(f"Turn {i} - Coaching Tips", expanded=i==len(history)):
-                    st.markdown(f'''
-                    <div class="coaching-section">
-                    <div class="coaching-title">Phonetic Corrections & Pronunciation Tips</div>
-                    {coaching}
-                    </div>
-                    ''', unsafe_allow_html=True)
-    else:
-        st.info("💡 Record audio to receive personalized coaching tips.")
-    
-    st.divider()
-    
-    # Audio playback section
+with top_col2:
     st.subheader("🔊 Audio Playback")
     
     col_audio1, col_audio2 = st.columns(2)
     
     with col_audio1:
-        st.caption("💬 Conversational Response")
-        try:
-            conv_audio = get_feedback_audio(st.session_state.session_id, "conversational")
-            if conv_audio:
-                st.audio(conv_audio, format="audio/wav", autoplay=True)
-            else:
-                st.info("No conversational audio yet")
-        except:
-            st.info("Loading audio...")
+        st.caption("💬 Conversational")
+        conv_audio = get_feedback_audio(st.session_state.session_id, "conversational")
+        if conv_audio:
+            st.audio(conv_audio, format="audio/wav", autoplay=True)
     
     with col_audio2:
-        st.caption("📝 Coaching Audio")
-        try:
-            coaching_audio = get_feedback_audio(st.session_state.session_id, "coaching")
-            if coaching_audio:
-                st.audio(coaching_audio, format="audio/wav")
-            else:
-                st.info("No coaching audio yet")
-        except:
-            st.info("Loading audio...")
+        st.caption("📝 Coaching")
+        coaching_audio = get_feedback_audio(st.session_state.session_id, "coaching")
+        if coaching_audio:
+            st.audio(coaching_audio, format="audio/wav")
     
     st.divider()
     
-    # Conversation management
-    st.subheader("⚙️ Manage Conversation")
-    
+    # Conversation management buttons
     col_manage1, col_manage2 = st.columns(2)
     
     with col_manage1:
@@ -451,10 +360,9 @@ with col2:
                     timeout=5
                 )
                 if response.status_code == 200:
-                    st.success("✅ History cleared!")
                     st.rerun()
-            except Exception as e:
-                st.error(f"Error: {str(e)}")
+            except:
+                pass
     
     with col_manage2:
         if st.button("🔄 New Chat", use_container_width=True, key="new_conversation"):
@@ -462,9 +370,67 @@ with col2:
             st.session_state.transcript = None
             st.session_state.coaching_feedback = None
             st.session_state.conversational_response = None
-            st.session_state.last_processed_audio_hash = None  # Reset audio hash to allow new recording
-            st.success("✅ New conversation!")
+            st.session_state.last_processed_audio_hash = None
             st.rerun()
+
+st.divider()
+
+# Main content - conversation takes full width
+st.subheader("💬 Conversation Thread")
+
+# Load and display conversation history as chat
+history = get_conversation_history(st.session_state.session_id)
+
+if history:
+    chat_html = '<div class="chat-container">'
+    
+    for i, turn in enumerate(history):
+        user_input = turn.get('user', 'N/A')
+        conversational = turn.get('conversational', 'N/A')
+        
+        # Clean XML tags from both messages
+        user_input = strip_xml_tags(user_input) if user_input != 'N/A' else user_input
+        conversational = strip_xml_tags(conversational) if conversational != 'N/A' else conversational
+        
+        # Escape HTML special characters to prevent rendering issues
+        user_input_escaped = (user_input
+            .replace('&', '&amp;')
+            .replace('<', '&lt;')
+            .replace('>', '&gt;')
+            .replace('"', '&quot;'))
+        
+        conversational_escaped = (conversational
+            .replace('&', '&amp;')
+            .replace('<', '&lt;')
+            .replace('>', '&gt;')
+            .replace('"', '&quot;'))
+        
+        # User message (right-aligned bubble)
+        chat_html += f'''<div class="chat-message user-message"><div class="message-bubble">{user_input_escaped}</div></div>'''
+        
+        # AI conversational message (left-aligned bubble)
+        if conversational and conversational != 'N/A':
+            chat_html += f'''<div class="chat-message ai-message"><div class="message-bubble">{conversational_escaped}</div></div>'''
+    
+    chat_html += '</div>'
+    st.markdown(chat_html, unsafe_allow_html=True)
+
+st.divider()
+
+# Coaching feedback section
+st.subheader("📋 Coaching & Learning")
+
+if history:
+    for i, turn in enumerate(history, 1):
+        coaching = turn.get('coaching', None)
+        if coaching:
+            with st.expander(f"Turn {i} - Coaching Tips", expanded=i==len(history)):
+                st.markdown(f'''
+                <div class="coaching-section">
+                <div class="coaching-title">Phonetic Corrections & Pronunciation Tips</div>
+                {coaching}
+                </div>
+                ''', unsafe_allow_html=True)
 
 # Footer
 st.divider()
