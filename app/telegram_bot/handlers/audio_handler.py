@@ -193,21 +193,7 @@ class AudioHandler:
                 parse_mode="Markdown"
             )
         
-        # Send coaching audio if available
-        coaching_audio_path = response.get('coaching_audio_path')
-        if coaching_audio_path:
-            try:
-                with open(coaching_audio_path, 'rb') as audio:
-                    await context.bot.send_audio(
-                        chat_id=chat_id,
-                        audio=audio,
-                        caption="🔊 Coaching Audio (Correct Pronunciation)",
-                        title="Coaching Audio"
-                    )
-            except Exception as e:
-                logger.warning(f"Could not send coaching audio: {str(e)}")
-        
-        # Send conversational audio if available
+        # Send conversational audio (in English)
         conversational_audio_path = response.get('conversational_audio_path')
         if conversational_audio_path:
             try:
@@ -215,7 +201,7 @@ class AudioHandler:
                     await context.bot.send_audio(
                         chat_id=chat_id,
                         audio=audio,
-                        caption="🎙️ Conversational Response Audio",
+                        caption="🎙️ Response Audio",
                         title="Conversational Response"
                     )
             except Exception as e:

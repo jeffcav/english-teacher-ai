@@ -585,8 +585,8 @@ class PhonicFlowArchitect:
                 conversation_history
             )
             
-            # Step 4: Both responses to Speech (TTS) with gender-appropriate voices
-            coaching_audio_path = await self.synthesize_feedback(coaching_text, session_id, "coaching", speaker_gender=speaker_gender)
+            # Step 4: Synthesize only the conversational response to speech (TTS in English)
+            # Coaching feedback is provided as text only (in Portuguese)
             conversational_audio_path = await self.synthesize_feedback(conversational_text, session_id, "conversational", speaker_gender=speaker_gender)
             
             # Step 5: Save this turn to conversation history
@@ -601,7 +601,6 @@ class PhonicFlowArchitect:
                 user_transcript=transcript,
                 coaching_feedback=coaching_text,
                 conversational_response=conversational_text,
-                coaching_audio_path=coaching_audio_path,
                 conversational_audio_path=conversational_audio_path
             )
         except FileNotFoundError as e:

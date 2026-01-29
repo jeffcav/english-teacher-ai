@@ -10,7 +10,6 @@ class FeedbackResponse(BaseModel):
     user_transcript: str
     coaching_feedback: str
     conversational_response: str
-    coaching_audio_path: str
     conversational_audio_path: str
 
 

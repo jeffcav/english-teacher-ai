@@ -178,7 +178,6 @@ if "session_id" not in st.session_state:
     st.session_state.transcript = None
     st.session_state.coaching_feedback = None
     st.session_state.conversational_response = None
-    st.session_state.coaching_audio_path = None
     st.session_state.conversational_audio_path = None
     st.session_state.coaching_feedback_portuguese = None
     st.session_state.conversational_response_portuguese = None
@@ -320,7 +319,6 @@ with top_col1:
                 st.session_state.transcript = result.get("user_transcript", "")
                 st.session_state.coaching_feedback = strip_xml_tags(result.get("coaching_feedback", ""))
                 st.session_state.conversational_response = strip_xml_tags(result.get("conversational_response", ""))
-                st.session_state.coaching_audio_path = result.get("coaching_audio_path", "")
                 st.session_state.conversational_audio_path = result.get("conversational_audio_path", "")
                 st.session_state.coaching_feedback_portuguese = result.get("coaching_feedback_portuguese", "")
                 st.session_state.conversational_response_portuguese = result.get("conversational_response_portuguese", "")
@@ -333,19 +331,12 @@ with top_col1:
 with top_col2:
     st.subheader("🔊 Audio Playback")
     
-    col_audio1, col_audio2 = st.columns(2)
-    
-    with col_audio1:
-        st.caption("💬 Conversational")
-        conv_audio = get_feedback_audio(st.session_state.session_id, "conversational")
-        if conv_audio:
-            st.audio(conv_audio, format="audio/wav", autoplay=True)
-    
-    with col_audio2:
-        st.caption("📝 Coaching")
-        coaching_audio = get_feedback_audio(st.session_state.session_id, "coaching")
-        if coaching_audio:
-            st.audio(coaching_audio, format="audio/wav")
+    st.caption("💬 Conversational Response")
+    conv_audio = get_feedback_audio(st.session_state.session_id, "conversational")
+    if conv_audio:
+        st.audio(conv_audio, format="audio/wav", autoplay=True)
+    else:
+        st.info("Audio not available yet")
     
     st.divider()
     

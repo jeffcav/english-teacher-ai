@@ -135,23 +135,30 @@ async def process_audio(
 
 
 @app.get("/audio/{session_id}", tags=["Audio Processing"])
-async def get_feedback_audio(session_id: str, audio_type: str = "coaching"):
+async def get_feedback_audio(session_id: str, audio_type: str = "conversational"):
     """
     Retrieve synthesized audio for a session.
     
     Args:
         session_id: Session identifier
-        audio_type: Type of audio to retrieve ("coaching" or "conversational")
+        audio_type: Type of audio to retrieve (only "conversational" is supported)
         
     Returns:
-        WAV audio file with synthesized feedback (from CoquiTTS)
+        WAV audio file with synthesized conversational feedback
     """
+    # Only conversational audio is synthesized
+    if audio_type != "conversational":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only 'conversational' audio type is supported. Coaching feedback is provided as text only."
+        )
+    
     audio_path = FEEDBACK_DIR / f"{session_id}_{audio_type}.wav"
     
     if not audio_path.exists():
         raise HTTPException(
             status_code=404,
-            detail=f"Audio not found for session {session_id} (type: {audio_type})"
+            detail=f"Audio not found for session {session_id}"
         )
     
     return FileResponse(
