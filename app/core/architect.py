@@ -8,7 +8,7 @@ import json
 import re
 import whisper
 import ollama
-import pyttsx3
+from TTS.api import TTS
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple
 from app.models.schemas import FeedbackResponse
@@ -29,8 +29,38 @@ class PhonicFlowArchitect:
     Coordinates three AI engines:
     - Whisper (STT): Transcribes speech to text
     - Ollama (LLM): Analyzes and provides coaching
-    - Edge-TTS (TTS): Synthesizes audio feedback
+    - CoquiTTS (TTS): Synthesizes audio feedback (English only)
     """
+
+    @staticmethod
+    def _filter_english_only(text: str) -> str:
+        """
+        Filter out non-English characters from text.
+        Keeps only ASCII letters, numbers, common punctuation, and spaces.
+        Non-English characters are silently discarded.
+        
+        Args:
+            text: Text potentially containing non-English characters
+            
+        Returns:
+            Text with only English characters preserved
+        """
+        if not text or not isinstance(text, str):
+            return ""
+        
+        import unicodedata
+        
+        # Keep English letters, numbers, spaces, and common punctuation
+        allowed_chars = set(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,;:!?'\"-()&"
+        )
+        
+        filtered = ''.join(char for char in text if char in allowed_chars)
+        
+        # Clean up multiple spaces
+        filtered = ' '.join(filtered.split())
+        
+        return filtered.strip()
 
     @staticmethod
     def _strip_xml_tags(text: str) -> str:
@@ -321,7 +351,7 @@ Respond naturally to what the user said, as if you were their friend having a co
         """
         Step 3: Convert LLM feedback into audio for the user.
         
-        Uses pyttsx3 for local, offline text-to-speech synthesis.
+        Uses CoquiTTS for local, offline text-to-speech synthesis.
         
         Args:
             feedback_text: Text to synthesize into speech
@@ -329,9 +359,9 @@ Respond naturally to what the user said, as if you were their friend having a co
             feedback_type: Type of feedback ("coaching" or "conversational")
             
         Returns:
-            Path to the generated MP3 file
+            Path to the generated WAV file
         """
-        output_path = self.feedback_dir / f"{output_name}_{feedback_type}.mp3"
+        output_path = self.feedback_dir / f"{output_name}_{feedback_type}.wav"
         
         try:
             # Validate input
@@ -340,9 +370,9 @@ Respond naturally to what the user said, as if you were their friend having a co
             
             print(f"[TTS] Synthesizing {feedback_type} feedback ({len(feedback_text)} chars) to {output_path}")
             
-            # Run pyttsx3 in a thread pool to avoid blocking the async context
+            # Run CoquiTTS in a thread pool to avoid blocking the async context
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self._synthesize_with_pyttsx3, feedback_text, str(output_path))
+            await loop.run_in_executor(None, self._synthesize_with_coqui, feedback_text, str(output_path))
             
             # Verify file was created
             if output_path.exists() and output_path.stat().st_size > 0:
@@ -356,61 +386,48 @@ Respond naturally to what the user said, as if you were their friend having a co
             print(f"[TTS] ERROR: {str(e)}")
             raise Exception(f"TTS synthesis failed: {str(e)}")
 
-    def _synthesize_with_pyttsx3(self, text: str, output_file: str) -> None:
+    def _synthesize_with_coqui(self, text: str, output_file: str) -> None:
         """
-        Helper method to run pyttsx3 synthesis.
+        Helper method to run CoquiTTS synthesis with English-only configuration.
         Executed in a thread pool to avoid blocking.
+        Non-English characters are filtered out before synthesis.
         
         Args:
             text: Text to synthesize
             output_file: Output file path
         """
-        import time
-        
-        engine = None
         try:
-            print(f"[TTS] Initializing pyttsx3 engine...")
+            print(f"[TTS] Filtering text for English-only characters...")
             
-            # Create a fresh engine instance
-            engine = pyttsx3.init()
+            # Filter out non-English characters
+            filtered_text = self._filter_english_only(text)
             
-            # Configure voice and speech parameters
-            engine.setProperty('rate', 150)      # Speech rate (words per minute)
-            engine.setProperty('volume', 1.0)    # Volume (0.0 to 1.0)
+            if not filtered_text or len(filtered_text.strip()) == 0:
+                raise ValueError("No English characters found in text after filtering")
             
-            # Try to set a voice (optional)
-            try:
-                voices = engine.getProperty('voices')
-                if voices:
-                    print(f"[TTS] Available voices: {len(voices)}")
-                    engine.setProperty('voice', voices[0].id)
-                    print(f"[TTS] Using voice: {voices[0].name}")
-            except Exception as voice_error:
-                print(f"[TTS] Warning: Could not set voice - {voice_error}")
+            print(f"[TTS] Original length: {len(text)} | Filtered length: {len(filtered_text)}")
+            print(f"[TTS] Initializing CoquiTTS engine (English model)...")
             
-            print(f"[TTS] Saving to file: {output_file}")
+            # Initialize TTS model with English-only configuration
+            # Using ljspeech model: English female voice, high quality
+            tts = TTS(
+                model_name="tts_models/en/ljspeech/glow-tts",
+                gpu=False  # Set gpu=True if CUDA is available
+            )
             
-            # Save to file
-            engine.save_to_file(text, output_file)
+            print(f"[TTS] Speaking text: {filtered_text[:100]}...")
             
-            print(f"[TTS] Running engine...")
-            engine.runAndWait()
+            # Generate speech with English-specific settings
+            tts.tts_to_file(
+                text=filtered_text,
+                file_path=output_file
+            )
             
-            # Give callbacks time to complete before cleaning up
-            time.sleep(0.5)
-            
-            print(f"[TTS] Engine completed")
+            print(f"[TTS] Speech synthesis completed (English-only mode)")
             
         except Exception as e:
-            print(f"[TTS] Error in _synthesize_with_pyttsx3: {str(e)}")
+            print(f"[TTS] Error in _synthesize_with_coqui: {str(e)}")
             raise
-        finally:
-            # Ensure proper cleanup
-            if engine is not None:
-                try:
-                    engine.stop()
-                except:
-                    pass
 
     async def process_user_input(
         self,

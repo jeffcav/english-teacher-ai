@@ -144,9 +144,9 @@ async def get_feedback_audio(session_id: str, audio_type: str = "coaching"):
         audio_type: Type of audio to retrieve ("coaching" or "conversational")
         
     Returns:
-        MP3 audio file with synthesized feedback
+        WAV audio file with synthesized feedback (from CoquiTTS)
     """
-    audio_path = FEEDBACK_DIR / f"{session_id}_{audio_type}.mp3"
+    audio_path = FEEDBACK_DIR / f"{session_id}_{audio_type}.wav"
     
     if not audio_path.exists():
         raise HTTPException(
@@ -156,8 +156,8 @@ async def get_feedback_audio(session_id: str, audio_type: str = "coaching"):
     
     return FileResponse(
         path=audio_path,
-        media_type="audio/mpeg",
-        filename=f"feedback_{session_id}_{audio_type}.mp3"
+        media_type="audio/wav",
+        filename=f"feedback_{session_id}_{audio_type}.wav"
     )
 
 

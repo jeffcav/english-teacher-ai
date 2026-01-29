@@ -450,7 +450,7 @@ with col2:
         try:
             conv_audio = get_feedback_audio(st.session_state.session_id, "conversational")
             if conv_audio:
-                st.audio(conv_audio, format="audio/mp3")
+                st.audio(conv_audio, format="audio/wav")
             else:
                 st.info("No conversational audio yet")
         except:
@@ -461,7 +461,7 @@ with col2:
         try:
             coaching_audio = get_feedback_audio(st.session_state.session_id, "coaching")
             if coaching_audio:
-                st.audio(coaching_audio, format="audio/mp3")
+                st.audio(coaching_audio, format="audio/wav")
             else:
                 st.info("No coaching audio yet")
         except:
