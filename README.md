@@ -10,9 +10,10 @@
 4. [Installation](#installation)
 5. [Configuration](#configuration)
 6. [Running the Application](#running)
-7. [API Endpoints](#endpoints)
-8. [Usage Guide](#usage)
-9. [Troubleshooting](#troubleshooting)
+7. [Telegram Bot Setup](#telegram)
+8. [API Endpoints](#endpoints)
+9. [Usage Guide](#usage)
+10. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -233,6 +234,176 @@ streamlit run app/frontend/streamlit_app.py
 ```
 
 The frontend will open at: **http://localhost:8501**
+
+### Start the Telegram Bot
+
+In another new terminal:
+```bash
+source venv/bin/activate
+cd /home/jeff/dev/pg/english
+python -m app.telegram_bot.main
+```
+
+The bot will connect to Telegram and start polling for messages.
+
+---
+
+## <a name="telegram"></a>🤖 Telegram Bot Setup
+
+### Overview
+
+PhonicFlow includes a **Telegram Bot** that allows users to interact with the AI English tutor directly through Telegram. Users can send audio messages to receive pronunciation feedback, linguistic coaching, and conversational responses.
+
+### Features
+
+- 🎙️ **Audio Processing**: Send voice messages directly to Telegram
+- 📝 **Instant Feedback**: Receive coaching and conversational responses
+- 🎵 **Audio Playback**: Listen to synthesized English responses
+- 💾 **Session Management**: Maintain conversation history per user
+- ⏱️ **Rate Limiting**: Configurable limits to prevent abuse
+- 🔒 **Timeout Protection**: Automatic session cleanup after 24 hours
+
+### Prerequisites
+
+1. **Telegram Bot Token**
+   - Create a bot via [@BotFather](https://t.me/botfather) on Telegram
+   - Copy the API token provided
+
+2. **Backend Service Running**
+   - Ensure FastAPI backend is accessible
+   - Default: `http://localhost:8000`
+
+### Configuration
+
+Add these environment variables to your `.env` file:
+
+```env
+# Telegram Bot Configuration
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+BACKEND_URL=http://localhost:8000
+BACKEND_TIMEOUT=30
+
+# Bot Behavior
+BOT_POLLING_INTERVAL=1
+BOT_POLLING_TIMEOUT=30
+
+# Rate Limiting (messages per minute)
+BOT_RATE_LIMIT=true
+BOT_RATE_LIMIT_MPM=30
+
+# Session Management
+SESSION_TIMEOUT_HOURS=24
+SESSION_STORAGE_PATH=app/feedback_storage
+
+# Audio Settings
+MAX_AUDIO_SIZE_MB=20
+
+# Logging
+BOT_LOG_FILE=logs/telegram_bot.log
+```
+
+### Running the Bot
+
+1. **Ensure backend is running:**
+   ```bash
+   python -m uvicorn app.backend.main:app --reload --host 0.0.0.0 --port 8000
+   ```
+
+2. **Start the Telegram bot in a new terminal:**
+   ```bash
+   source venv/bin/activate
+   cd /home/jeff/dev/pg/english
+   python -m app.telegram_bot.main
+   ```
+
+3. **Verify it's running:**
+   - Search for your bot on Telegram by name (created via @BotFather)
+   - Send a message like `/start`
+   - You should receive a welcome message
+
+### Usage
+
+#### Basic Commands
+
+```
+/start          - Display welcome message and instructions
+/help           - Show available commands
+/clear          - Clear conversation history for current session
+/health         - Check bot and backend status
+```
+
+#### Sending Feedback
+
+1. **Record an audio message:**
+   - Hold down the microphone icon in Telegram
+   - Speak your English sentence or phrase
+   - Release to send
+
+2. **Receive feedback:**
+   - **Coaching Feedback**: Text response in Brazilian Portuguese with specific improvements (if needed)
+   - **Conversational Response**: Text response in English with proactive follow-up question
+   - **Audio**: Synthesized English response (conversational response) as MP3 file
+
+3. **Continue the conversation:**
+   - Send another voice message
+   - The bot maintains conversation context
+   - Get personalized feedback based on previous exchanges
+
+#### Example Interaction
+
+```
+User: [Voice message] "I go to the market yesterday"
+
+Bot:
+📝 Coaching Feedback:
+1. Gramática: Use "went" instead of "go" (past tense)
+
+💬 Conversational Response:
+Got it! Past tense is tricky. So you went to the market yesterday—was it for groceries or something else?
+
+🎙️ [Audio file attached for playback]
+```
+
+### Troubleshooting
+
+#### Bot doesn't respond
+
+1. Verify token is correct:
+   ```bash
+   curl -X GET https://api.telegram.org/bot<YOUR_TOKEN>/getMe
+   ```
+
+2. Check backend is accessible:
+   ```bash
+   curl http://localhost:8000/health
+   ```
+
+3. Check bot logs:
+   ```bash
+   tail -f logs/telegram_bot.log
+   ```
+
+#### "Backend URL not accessible" error
+
+- Ensure `BACKEND_URL` environment variable is set
+- For local development: `BACKEND_URL=http://localhost:8000`
+- For remote server: Use full domain URL
+
+#### Rate limiting kicks in
+
+- Limit is 30 messages per minute by default
+- Increase limit in `.env`:
+  ```env
+  BOT_RATE_LIMIT_MPM=50
+  ```
+
+#### Audio file too large
+
+- Default max size is 20MB
+- Increase in `.env`:
+  ```env
+  MAX_AUDIO_SIZE_MB=50
+  ```
 
 ---
 
@@ -465,22 +636,35 @@ ffmpeg -i input.ogg -acodec libmp3lame -ab 192k output.mp3
 └── app/
     ├── backend/
     │   ├── __init__.py
-    │   └── main.py           # FastAPI application
+    │   └── main.py                # FastAPI application
     │
     ├── frontend/
     │   ├── __init__.py
-    │   └── streamlit_app.py  # Streamlit UI
+    │   └── streamlit_app.py       # Streamlit web UI
+    │
+    ├── telegram_bot/
+    │   ├── __init__.py
+    │   ├── main.py                # Bot entry point
+    │   ├── bot.py                 # Main bot class
+    │   ├── config.py              # Bot configuration
+    │   ├── handlers/              # Message handlers
+    │   │   ├── __init__.py
+    │   │   ├── audio_handler.py   # Audio processing
+    │   │   ├── command_handler.py # Command processing
+    │   │   └── message_handler.py # Text message handling
+    │   └── utils/                 # Utility functions
     │
     ├── core/
     │   ├── __init__.py
-    │   ├── config.py         # Configuration management
-    │   └── architect.py      # Main orchestration logic
+    │   ├── config.py              # Configuration management
+    │   ├── architect.py           # Main orchestration logic
+    │   └── prompts.py             # LLM system prompts
     │
     ├── models/
     │   ├── __init__.py
-    │   └── schemas.py        # Pydantic models
+    │   └── schemas.py             # Pydantic models
     │
-    └── feedback_storage/     # Generated audio feedback files
+    └── feedback_storage/          # Generated audio feedback files
 ```
 
 ---
