@@ -20,7 +20,7 @@ from app.core.config import (
     SYSTEM_PROMPT,
     OLLAMA_BASE_URL,
 )
-from app.core.prompts import get_proactive_coaching_prompt, PROACTIVE_CURIOSITY_SYSTEM_PROMPT
+from app.core.prompts import get_proactive_coaching_prompt, get_concise_feedback_prompt, PROACTIVE_CURIOSITY_SYSTEM_PROMPT, CONCISE_FEEDBACK_SYSTEM_PROMPT
 
 
 class PhonicFlowArchitect:
@@ -36,30 +36,39 @@ class PhonicFlowArchitect:
     @staticmethod
     def _filter_english_only(text: str) -> str:
         """
-        Filter out non-English characters from text.
-        Keeps only ASCII letters, numbers, common punctuation, and spaces.
-        Non-English characters are silently discarded.
+        Filter text to keep only valid English characters for TTS.
+        Preserves letters, numbers, common punctuation, and safe Unicode characters.
+        Removes HTML/XML tags and control characters.
         
         Args:
-            text: Text potentially containing non-English characters
+            text: Text potentially containing non-English or invalid characters
             
         Returns:
-            Text with only English characters preserved
+            Text with only valid English characters for TTS
         """
         if not text or not isinstance(text, str):
             return ""
         
         import unicodedata
         
-        # Keep English letters, numbers, spaces, and common punctuation
+        # Keep English letters, numbers, spaces, and extended punctuation
         allowed_chars = set(
-            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,;:!?'\"-()&"
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,;:!?'\"-()&\n\t"
         )
         
-        filtered = ''.join(char for char in text if char in allowed_chars)
+        # Also allow common Unicode punctuation and symbols that TTS can handle
+        # Add: em-dash (—), en-dash (–), ellipsis (…), and curly quotes
+        safe_unicode = {'—', '–', '…', '"', '"', ''', ''', '«', '»'}
         
-        # Clean up multiple spaces
-        filtered = ' '.join(filtered.split())
+        filtered = ""
+        for char in text:
+            if char in allowed_chars or char in safe_unicode:
+                filtered += char
+            elif char.isspace():  # Keep all whitespace
+                filtered += char
+        
+        # Clean up multiple spaces and newlines
+        filtered = re.sub(r'\s+', ' ', filtered)
         
         return filtered.strip()
 
@@ -289,19 +298,21 @@ class PhonicFlowArchitect:
             return ("No speech detected. Please try again with a clearer audio input.", "")
 
         try:
-            # Use the proactive curiosity prompt
-            prompt = get_proactive_coaching_prompt(user_text, conversation_history)
+            # Use concise, direct feedback prompt
+            prompt = get_concise_feedback_prompt(user_text, conversation_history)
             
             response = ollama.chat(
                 model=self.llm_name,
                 messages=[
-                    {'role': 'system', 'content': PROACTIVE_CURIOSITY_SYSTEM_PROMPT},
+                    {'role': 'system', 'content': CONCISE_FEEDBACK_SYSTEM_PROMPT},
                     {'role': 'user', 'content': prompt}
                 ],
                 stream=False
             )
             
             response_text = response['message']['content'].strip()
+            
+            print(f"[LLM] Raw response from Ollama:\n{response_text[:200]}...\n")
             
             # Parse the two sections
             coaching_feedback = ""
@@ -312,11 +323,18 @@ class PhonicFlowArchitect:
                 coaching_section = response_text.split("---COACHING---")[1].split("---CONVERSATION---")[0].strip()
                 conversation_section = response_text.split("---CONVERSATION---")[1].strip()
                 
+                print(f"[LLM] Coaching section extracted: {coaching_section[:100]}...")
+                print(f"[LLM] Conversation section extracted: {conversation_section[:100]}...")
+                
                 # Clean XML tags from both responses
                 coaching_feedback = self._strip_xml_tags(coaching_section)
                 conversational_response = self._strip_xml_tags(conversation_section)
+                
+                print(f"[LLM] Coaching after XML cleanup: {coaching_feedback[:100]}...")
+                print(f"[LLM] Conversation after XML cleanup: {conversational_response[:100]}...")
             else:
                 # Fallback: treat entire response as coaching if markers not found
+                print(f"[LLM] Markers not found. Response does not contain ---COACHING--- and ---CONVERSATION--- sections")
                 coaching_feedback = self._strip_xml_tags(response_text)
                 conversational_response = "Thank you for sharing that!"
             
@@ -380,15 +398,23 @@ class PhonicFlowArchitect:
             output_file: Output file path
         """
         try:
-            print(f"[TTS] Filtering text for English-only characters...")
+            print(f"[TTS] Original text: {text[:100]}...")
+            print(f"[TTS] Original text length: {len(text)}")
+            print(f"[TTS] Original text bytes: {text.encode('utf-8')[:100]}")
             
-            # Filter out non-English characters
+            # Filter out problematic characters
             filtered_text = self._filter_english_only(text)
             
             if not filtered_text or len(filtered_text.strip()) == 0:
-                raise ValueError("No English characters found in text after filtering")
+                raise ValueError(f"No valid characters found in text after filtering. Original: {text[:50]}")
             
-            print(f"[TTS] Original length: {len(text)} | Filtered length: {len(filtered_text)}")
+            print(f"[TTS] Filtered text: {filtered_text[:100]}...")
+            print(f"[TTS] Filtered text length: {len(filtered_text)}")
+            
+            if len(filtered_text) < len(text):
+                print(f"[TTS] WARNING: Text was filtered from {len(text)} to {len(filtered_text)} chars")
+                print(f"[TTS] Removed {len(text) - len(filtered_text)} characters")
+            
             print(f"[TTS] Initializing CoquiTTS engine (English model)...")
             
             # Initialize TTS model with English-only configuration
@@ -406,10 +432,11 @@ class PhonicFlowArchitect:
                 file_path=output_file
             )
             
-            print(f"[TTS] Speech synthesis completed (English-only mode)")
+            print(f"[TTS] Speech synthesis completed successfully")
             
         except Exception as e:
             print(f"[TTS] Error in _synthesize_with_coqui: {str(e)}")
+            print(f"[TTS] Attempted to synthesize: {text[:100]}")
             raise
 
     async def process_user_input(
