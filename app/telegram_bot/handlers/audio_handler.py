@@ -198,11 +198,10 @@ class AudioHandler:
         if conversational_audio_path:
             try:
                 with open(conversational_audio_path, 'rb') as audio:
-                    await context.bot.send_audio(
+                    await context.bot.send_voice(
                         chat_id=chat_id,
-                        audio=audio,
-                        caption="🎙️ Response Audio",
-                        title="Conversational Response"
+                        voice=audio,
+                        caption="🎙️ Response Audio"
                     )
             except Exception as e:
                 logger.warning(f"Could not send conversational audio: {str(e)}")
