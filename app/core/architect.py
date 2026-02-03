@@ -517,7 +517,7 @@ class PhonicFlowArchitect:
             # Create Kokoro pipeline and generate speech
             # Kokoro API: KPipeline(lang_code, device) returns generator of Results
             # Each result has .audio (torch tensor) and .phonemes
-            pipeline = kokoro.KPipeline(lang_code=lang_code, device=device)
+            pipeline = kokoro.KPipeline(lang_code=lang_code, device=device, repo_id='hexgrad/Kokoro-82M')
             
             # Collect audio from all results
             import wave
