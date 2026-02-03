@@ -86,8 +86,13 @@ class AudioHandler:
             
             # Submit to backend
             logger.info(f"Submitting audio to backend for session {session_id}")
+            
+            # Get user's English level
+            session = self.session_manager.get_session(user_id)
+            english_level = session.get('english_level', 'intermediate') if session else 'intermediate'
+            
             try:
-                response = await self._submit_to_backend(session_id, audio_wav)
+                response = await self._submit_to_backend(session_id, audio_wav, english_level)
             except Exception as e:
                 logger.error(f"Backend submission failed: {str(e)}")
                 await context.bot.edit_message_text(
@@ -123,13 +128,14 @@ class AudioHandler:
                 text="❌ Error processing audio. Please try again."
             )
     
-    async def _submit_to_backend(self, session_id: str, audio_wav: bytes) -> dict:
+    async def _submit_to_backend(self, session_id: str, audio_wav: bytes, english_level: str = 'intermediate') -> dict:
         """
         Submit audio to backend API
         
         Args:
             session_id: Backend session ID
             audio_wav: WAV audio bytes
+            english_level: User's English level
             
         Returns:
             Backend response dict
@@ -137,7 +143,7 @@ class AudioHandler:
         Raises:
             Exception: If submission fails
         """
-        response = self.api_client.process_audio(session_id, audio_wav)
+        response = self.api_client.process_audio(session_id, audio_wav, english_level)
         return response
     
     async def _send_response(self, context, chat_id: int, processing_msg_id: int, response: dict):

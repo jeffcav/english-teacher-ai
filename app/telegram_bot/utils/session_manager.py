@@ -56,7 +56,8 @@ class SessionManager:
             'created_at': datetime.now().isoformat(),
             'last_activity': datetime.now().isoformat(),
             'conversation_turns': 0,
-            'state': 'active'
+            'state': 'active',
+            'english_level': 'intermediate'  # Default to intermediate
         }
         self._save_sessions()
         logger.info(f"Created new session {session_id} for user {telegram_user_id}")

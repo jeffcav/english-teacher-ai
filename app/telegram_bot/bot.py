@@ -5,7 +5,7 @@ Coordinates bot lifecycle and message routing
 import logging
 import signal
 from telegram import BotCommand
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 
 from .config import TelegramConfig
 from .handlers import MessageHandler as MsgHandler, AudioHandler as AudioHandlerClass
@@ -51,6 +51,7 @@ class PhonicFlowBot:
         """Setup bot commands"""
         commands = [
             BotCommand("start", "Start new session"),
+            BotCommand("level", "Set your English level"),
             BotCommand("help", "Show help"),
             BotCommand("history", "View conversation history"),
             BotCommand("status", "Check session status"),
@@ -122,6 +123,9 @@ class PhonicFlowBot:
             CommandHandler("start", self.message_handler.handle_start)
         )
         self.application.add_handler(
+            CommandHandler("level", self.message_handler.handle_level)
+        )
+        self.application.add_handler(
             CommandHandler("help", self.message_handler.handle_help)
         )
         self.application.add_handler(
@@ -135,6 +139,11 @@ class PhonicFlowBot:
         )
         self.application.add_handler(
             CommandHandler("delete", self.message_handler.handle_delete)
+        )
+        
+        # Callback query handler for level buttons
+        self.application.add_handler(
+            CallbackQueryHandler(self.message_handler.handle_level_callback, pattern="^level_")
         )
         
         # Audio handler

@@ -26,13 +26,14 @@ class APIClient:
         self.timeout = timeout
         self.session = requests.Session()
     
-    def process_audio(self, session_id: str, audio_bytes: bytes) -> Dict[str, Any]:
+    def process_audio(self, session_id: str, audio_bytes: bytes, english_level: str = 'intermediate') -> Dict[str, Any]:
         """
         Submit audio to backend for processing
         
         Args:
             session_id: Unique session identifier
             audio_bytes: WAV audio data
+            english_level: User's English level ('entry_level', 'intermediate', 'advanced')
             
         Returns:
             Response containing transcript, feedback, and audio paths
@@ -43,9 +44,9 @@ class APIClient:
         try:
             endpoint = f"{self.backend_url}/process"
             files = {"file": ("audio.wav", audio_bytes, "audio/wav")}
-            params = {"session_id": session_id}
+            params = {"session_id": session_id, "english_level": english_level}
             
-            logger.info(f"Submitting audio for session {session_id}")
+            logger.info(f"Submitting audio for session {session_id} (level: {english_level})")
             response = self.session.post(
                 endpoint,
                 files=files,

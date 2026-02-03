@@ -24,7 +24,7 @@ from app.core.config import (
     SYSTEM_PROMPT,
     OLLAMA_BASE_URL,
 )
-from app.core.prompts import get_proactive_coaching_prompt, get_concise_feedback_prompt, PROACTIVE_CURIOSITY_SYSTEM_PROMPT, CONCISE_FEEDBACK_SYSTEM_PROMPT
+from app.core.prompts import get_proactive_coaching_prompt, get_concise_feedback_prompt, PROACTIVE_CURIOSITY_SYSTEM_PROMPT, CONCISE_FEEDBACK_SYSTEM_PROMPT, get_system_prompt_for_level
 
 
 class PhonicFlowArchitect:
@@ -326,7 +326,8 @@ class PhonicFlowArchitect:
     async def get_linguistic_coaching(
         self,
         user_text: str,
-        conversation_history: List[Dict] = None
+        conversation_history: List[Dict] = None,
+        english_level: str = 'intermediate'
     ) -> tuple[str, str]:
         """
         Step 2: Use Ollama to analyze transcription and provide TWO outputs:
@@ -334,6 +335,7 @@ class PhonicFlowArchitect:
         2. Conversational response as if responding to a friend
         
         Uses conversation history for context to enable natural multi-turn dialogue.
+        Uses level-specific system prompt for tailored feedback.
         
         The LLM analyzes the transcribed text for:
         - Pronunciation errors (inferred from spelling)
@@ -345,6 +347,7 @@ class PhonicFlowArchitect:
         Args:
             user_text: Transcribed speech from user
             conversation_history: Previous turns in conversation (optional)
+            english_level: User's English level ('entry_level', 'intermediate', 'advanced')
             
         Returns:
             Tuple of (coaching_feedback, conversational_response)
@@ -353,13 +356,16 @@ class PhonicFlowArchitect:
             return ("No speech detected. Please try again with a clearer audio input.", "")
 
         try:
-            # Use concise, direct feedback prompt
-            prompt = get_concise_feedback_prompt(user_text, conversation_history)
+            # Use concise, direct feedback prompt with level-specific guidance
+            prompt = get_concise_feedback_prompt(user_text, conversation_history, english_level)
+            
+            # Get level-specific system prompt
+            system_prompt = get_system_prompt_for_level(english_level)
             
             response = ollama.chat(
                 model=self.llm_name,
                 messages=[
-                    {'role': 'system', 'content': CONCISE_FEEDBACK_SYSTEM_PROMPT},
+                    {'role': 'system', 'content': system_prompt},
                     {'role': 'user', 'content': prompt}
                 ],
                 stream=False
@@ -367,7 +373,7 @@ class PhonicFlowArchitect:
             
             response_text = response['message']['content'].strip()
             
-            print(f"[LLM] Raw response from Ollama:\n{response_text[:200]}...\n")
+            print(f"[LLM] Raw response from Ollama (level: {english_level}):\n{response_text[:200]}...\n")
             
             # Parse the two sections
             coaching_feedback = ""
@@ -545,7 +551,8 @@ class PhonicFlowArchitect:
     async def process_user_input(
         self,
         input_audio_path: str,
-        session_id: str
+        session_id: str,
+        english_level: str = 'intermediate'
     ) -> FeedbackResponse:
         """
         Orchestration Pipeline: Coordinates STT -> LLM -> TTS.
@@ -561,6 +568,7 @@ class PhonicFlowArchitect:
         Args:
             input_audio_path: Path to user's recorded audio
             session_id: Unique session identifier
+            english_level: User's English level ('entry_level', 'intermediate', 'advanced')
             
         Returns:
             FeedbackResponse with transcript, coaching, conversational, and audio paths
@@ -579,10 +587,11 @@ class PhonicFlowArchitect:
             # Step 2: Load conversation history for context
             conversation_history = self.get_conversation_history(session_id)
             
-            # Step 3: Text to Coaching + Conversational (LLM with context)
+            # Step 3: Text to Coaching + Conversational (LLM with context and level)
             coaching_text, conversational_text = await self.get_linguistic_coaching(
                 transcript,
-                conversation_history
+                conversation_history,
+                english_level=english_level
             )
             
             # Step 4: Synthesize only the conversational response to speech (TTS in English)

@@ -3,7 +3,7 @@ Message Handler
 Processes text commands and messages from Telegram
 """
 import logging
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 logger = logging.getLogger(__name__)
@@ -38,6 +38,7 @@ I'm your English pronunciation coach. Here's what I can do:
 
 **Commands:**
 🎤 Send an audio message to get pronunciation feedback
+/level - Set your English level
 /help - Show available commands
 /history - View your conversation history
 /status - Check your current session
@@ -50,7 +51,7 @@ I'm your English pronunciation coach. Here's what I can do:
 3. You'll get feedback in English and Portuguese 🇧🇷
 4. I'll provide coaching tips and audio examples
 
-Let's start! Send me an audio message.
+Let's start! First, tell me your English level with /level, then send me an audio message.
         """
         
         await context.bot.send_message(
@@ -61,6 +62,80 @@ Let's start! Send me an audio message.
         
         logger.info(f"User {user_id} started bot (session: {session_id})")
     
+    async def handle_level(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /level command - show English level selection menu"""
+        user_id = update.effective_user.id
+        session = self.session_manager.get_session(user_id)
+        
+        if not session:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="❌ No session found. Use /start to begin."
+            )
+            return
+        
+        current_level = session.get('english_level', 'intermediate')
+        
+        # Create inline keyboard with level options
+        keyboard = [
+            [
+                InlineKeyboardButton("🟢 Entry Level", callback_data="level_entry_level"),
+                InlineKeyboardButton("🟡 Intermediate", callback_data="level_intermediate"),
+            ],
+            [
+                InlineKeyboardButton("🔴 Advanced", callback_data="level_advanced"),
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        msg = f"""
+**📊 Select Your English Level**
+
+Current level: **{current_level.replace('_', ' ').title()}**
+
+Choose the level that best describes your English proficiency:
+
+🟢 **Entry Level** - Just starting out, learning basics
+🟡 **Intermediate** - Can have conversations, learning to improve
+🔴 **Advanced** - Near-native or fluent, focusing on nuance
+
+The feedback will be tailored to your level!
+        """
+        
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=msg,
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+        
+        logger.info(f"User {user_id} opened level selection menu")
+    
+    async def handle_level_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle level selection button presses"""
+        query = update.callback_query
+        user_id = query.from_user.id
+        
+        # Extract level from callback data
+        callback_data = query.data
+        if callback_data.startswith("level_"):
+            english_level = callback_data.replace("level_", "")
+            
+            # Update session with new level
+            if self.session_manager.update_session(user_id, english_level=english_level):
+                level_display = english_level.replace('_', ' ').title()
+                
+                await query.answer(f"✅ English level set to {level_display}")
+                
+                await query.edit_message_text(
+                    text=f"✅ **English Level Updated**\n\nYour level is now: **{level_display}**\n\nFeedback will be tailored to your proficiency. Send an audio message to start!",
+                    parse_mode="Markdown"
+                )
+                
+                logger.info(f"User {user_id} changed English level to {english_level}")
+            else:
+                await query.answer("❌ Error updating level. Try again.", show_alert=True)
+    
     async def handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /help command"""
         help_msg = """
@@ -70,6 +145,7 @@ Let's start! Send me an audio message.
 Send an audio message (voice note or audio file) for pronunciation analysis
 
 **Text Commands:**
+/level - Set your English level (entry level, intermediate, advanced)
 /start - Start new session
 /help - Show this message
 /history - View conversation history
@@ -79,12 +155,14 @@ Send an audio message (voice note or audio file) for pronunciation analysis
 
 **Features:**
 ✅ Real-time pronunciation feedback
+✅ Level-tailored coaching (Entry, Intermediate, Advanced)
 ✅ Portuguese translations 🇧🇷
 ✅ Coaching tips and corrections
 ✅ Audio playback examples
 ✅ Multi-turn conversations
 
 **Tips:**
+- Use /level to set your proficiency level
 - Record clear audio for better accuracy
 - Speak naturally and at a normal pace
 - Use actual English sentences for practice

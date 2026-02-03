@@ -80,7 +80,8 @@ async def health_check():
 @app.post("/process", tags=["Audio Processing"])
 async def process_audio(
     file: UploadFile = File(...),
-    session_id: str = None
+    session_id: str = None,
+    english_level: str = "intermediate"
 ):
     """
     Process user audio and generate phonetic coaching feedback.
@@ -88,12 +89,14 @@ async def process_audio(
     Args:
         file: Audio file (.wav, .mp3, .m4a, .flac)
         session_id: Optional session identifier (auto-generated if not provided)
+        english_level: User's English level ('entry_level', 'intermediate', 'advanced')
         
     Returns:
         FeedbackResponse containing:
         - user_transcript: Transcribed speech
-        - native_feedback: Coaching feedback from LLM
-        - audio_feedback_path: Path to synthesized feedback audio
+        - coaching_feedback: Coaching feedback from LLM (in Portuguese)
+        - conversational_response: Conversational response (in English)
+        - conversational_audio_path: Path to synthesized conversational audio
     """
     session_id = session_id or str(uuid.uuid4())
     
@@ -113,10 +116,11 @@ async def process_audio(
         with open(temp_audio_path, "wb") as f:
             f.write(contents)
         
-        # Process the audio through the pipeline
+        # Process the audio through the pipeline with english_level
         feedback = await architect.process_user_input(
             str(temp_audio_path),
-            session_id
+            session_id,
+            english_level=english_level
         )
         
         return feedback
